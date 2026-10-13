@@ -1,0 +1,2638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quaver → osu!mania Converter (.osz)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.0/lame.min.js"></script>
+<style>
+  :root {
+    --bg: #0c0d12;
+    --bg-2: #12141c;
+    --panel: #171a23;
+    --panel-2: #1e222d;
+    --border: #2a2f3d;
+    --border-2: #363c4d;
+    --text: #e8eaf1;
+    --muted: #8b93a7;
+    --accent: #6c8cff;
+    --accent-2: #a06cff;
+    --good: #35d07f;
+    --warn: #ffb454;
+    --bad: #ff6b6b;
+    --radius: 14px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: radial-gradient(1200px 700px at 20% -10%, #1a1f36 0%, transparent 60%),
+                radial-gradient(900px 600px at 90% 0%, #2a1a36 0%, transparent 55%),
+                var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; }
+
+  header { margin-bottom: 26px; }
+
+  h1 {
+    font-size: clamp(26px, 4.4vw, 40px);
+    margin: 0 0 8px;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+  h1 .arrow {
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    padding: 0 6px;
+  }
+  .sub { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.55; }
+
+  .dropzone {
+    border: 2px dashed var(--border-2);
+    border-radius: var(--radius);
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+    padding: 42px 24px;
+    text-align: center;
+    transition: border-color .18s ease, background .18s ease, transform .18s ease;
+    cursor: pointer;
+  }
+  .dropzone:hover { border-color: #4a5675; }
+  .dropzone.over {
+    border-color: var(--accent);
+    background: rgba(108, 140, 255, 0.08);
+    transform: scale(1.005);
+  }
+  .dz-icon { font-size: 36px; line-height: 1; margin-bottom: 12px; opacity: .9; }
+  .dz-title { font-weight: 650; font-size: 17px; margin-bottom: 5px; }
+  .dz-sub { color: var(--muted); font-size: 13.5px; margin-bottom: 20px; }
+  .dz-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+  .btn {
+    appearance: none;
+    border: 1px solid var(--border-2);
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background .15s ease, border-color .15s ease,
+                transform .1s ease, box-shadow .15s ease, opacity .15s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { background: #262b39; border-color: #454d63; }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+  .btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-color: transparent;
+    color: #fff;
+    box-shadow: 0 6px 20px -8px rgba(108,140,255,.9);
+  }
+  .btn.primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+    box-shadow: 0 8px 26px -8px rgba(108,140,255,1);
+  }
+
+  .btn.good {
+    background: rgba(53, 208, 127, .14);
+    border-color: rgba(53, 208, 127, .48);
+    color: #7ff0b4;
+  }
+  .btn.good:hover:not(:disabled) { background: rgba(53, 208, 127, .22); }
+
+  .btn.ghost { background: transparent; border-color: var(--border-2); color: var(--muted); }
+  .btn.ghost:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,.04); }
+
+  .btn.preview.playing {
+    background: rgba(255, 107, 107, .12);
+    border-color: rgba(255, 107, 107, .45);
+    color: #ff9b9b;
+  }
+  .btn.preview.playing:hover:not(:disabled) { background: rgba(255, 107, 107, .2); }
+
+  .status {
+    margin-top: 16px;
+    font-size: 14px;
+    min-height: 20px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .status.err { color: var(--bad); }
+  .status.ok  { color: var(--good); }
+
+  /* ---------- Speed panel ---------- */
+
+  .speed-panel {
+    margin-top: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 18px;
+    background: linear-gradient(180deg, var(--panel), var(--bg-2));
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+  }
+  .speed-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+  .speed-group.grow { flex: 1 1 auto; }
+  .speed-divider {
+    width: 1px;
+    height: 32px;
+    background: var(--border-2);
+    align-self: center;
+    flex: 0 0 auto;
+  }
+  .speed-label { display: flex; flex-direction: column; gap: 2px; min-width: 128px; }
+  .speed-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .speed-hint { font-size: 11.5px; color: #5f6779; }
+
+  .speed-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1 1 180px;
+    min-width: 140px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    outline: none;
+    cursor: pointer;
+    margin: 0;
+  }
+  .speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--accent);
+    box-shadow: 0 2px 10px rgba(0,0,0,.55);
+    cursor: pointer;
+  }
+  .speed-slider::-moz-range-thumb {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--accent);
+    box-shadow: 0 2px 10px rgba(0,0,0,.55);
+    cursor: pointer;
+  }
+  .speed-slider:focus-visible { box-shadow: 0 0 0 3px rgba(108,140,255,.35); }
+
+  .speed-input-wrap { display: flex; align-items: center; gap: 6px; }
+  .speed-num {
+    width: 88px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border-2);
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    font-weight: 700;
+    font-size: 14px;
+    text-align: center;
+  }
+  .speed-num:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(108,140,255,.2);
+  }
+  .speed-x { color: var(--muted); font-weight: 700; font-size: 14px; }
+
+  /* ---------- Pitch switch ---------- */
+
+  .switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+  }
+  .switch input {
+    position: absolute;
+    opacity: 0;
+    width: 0; height: 0;
+    pointer-events: none;
+  }
+  .switch-track {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    transition: background .18s ease, border-color .18s ease;
+    flex: 0 0 auto;
+  }
+  .switch-thumb {
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: #c7cde0;
+    transition: transform .18s ease, background .18s ease;
+    box-shadow: 0 2px 6px rgba(0,0,0,.4);
+  }
+  .switch input:checked + .switch-track {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-color: transparent;
+  }
+  .switch input:checked + .switch-track .switch-thumb {
+    transform: translateX(18px);
+    background: #fff;
+  }
+  .switch input:focus-visible + .switch-track {
+    box-shadow: 0 0 0 3px rgba(108,140,255,.35);
+  }
+  .switch-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    line-height: 1.25;
+  }
+  .switch-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .switch-hint { font-size: 11px; color: var(--muted); }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 28px 0 14px;
+    flex-wrap: wrap;
+  }
+  .toolbar h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .maps { display: flex; flex-direction: column; gap: 14px; }
+
+  .card {
+    background: linear-gradient(180deg, var(--panel), var(--bg-2));
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    animation: rise .3s ease both;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .card.converted { border-color: rgba(53, 208, 127, .38); }
+  .card.errored   { border-color: rgba(255, 107, 107, .35); }
+
+  .card-head { display: flex; gap: 14px; align-items: flex-start; }
+
+  .keys-badge {
+    flex: 0 0 auto;
+    min-width: 54px;
+    height: 54px;
+    padding: 0 8px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 17px;
+    letter-spacing: -0.03em;
+    color: #fff;
+    background: linear-gradient(135deg, #4b5bff, #8a5bff);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+  }
+  .keys-badge.wide {
+    font-size: 14px;
+    letter-spacing: -0.05em;
+  }
+  .keys-badge.k-low  { background: linear-gradient(135deg,#3aa0ff,#2ee6c8); }
+  .keys-badge.k4     { background: linear-gradient(135deg,#4b5bff,#8a5bff); }
+  .keys-badge.k5-6   { background: linear-gradient(135deg,#ff8a3d,#ff5b8a); }
+  .keys-badge.k7     { background: linear-gradient(135deg,#00c2a8,#38d16b); }
+  .keys-badge.k8-9   { background: linear-gradient(135deg,#ff5b8a,#a06cff); }
+  .keys-badge.k-high { background: linear-gradient(135deg,#f2c14e,#ff8a3d); }
+
+  .info { flex: 1 1 auto; min-width: 0; }
+  .info h3 {
+    margin: 0 0 2px;
+    font-size: 17px;
+    font-weight: 680;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .info .artist {
+    margin: 0 0 4px;
+    font-size: 14px;
+    color: #b7bdd0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .info .byline {
+    margin: 0 0 10px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .01em;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.05);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .chip.diff { color: #cfd4e4; border-color: var(--border-2); }
+  .chip.has  { color: #7ff0b4; border-color: rgba(53,208,127,.4); background: rgba(53,208,127,.08); }
+  .chip.miss { color: var(--warn); border-color: rgba(255,180,84,.4); background: rgba(255,180,84,.08); }
+  .chip.fix  { color: #9fc4ff; border-color: rgba(108,140,255,.5); background: rgba(108,140,255,.12); }
+  .chip.speed {
+    color: #ffb454;
+    border-color: rgba(255,180,84,.55);
+    background: rgba(255,180,84,.12);
+  }
+  .chip.pitch {
+    color: #c39bff;
+    border-color: rgba(160,108,255,.55);
+    background: rgba(160,108,255,.12);
+  }
+  .chip.bpm-auto {
+    color: #6ce0ff;
+    border-color: rgba(108,224,255,.55);
+    background: rgba(108,224,255,.10);
+  }
+  .chip.bpm-multi {
+    color: #ffa8e0;
+    border-color: rgba(255,168,224,.5);
+    background: rgba(255,168,224,.10);
+  }
+
+  .card-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+  .card-note {
+    font-size: 12.5px;
+    color: var(--muted);
+    flex: 1 1 100%;
+    line-height: 1.5;
+  }
+  .card-note.err { color: var(--bad); }
+  .card-note.ok  { color: var(--good); }
+  .card-note.speed { color: #9fc4ff; }
+  .card-note.bpm { color: #6ce0ff; }
+  .card-note code { background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 5px; font-size: 11.5px; }
+
+  .hidden { display: none !important; }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+    color: #5f6779;
+    line-height: 1.7;
+  }
+  code {
+    background: rgba(255,255,255,.06);
+    padding: 1px 5px;
+    border-radius: 5px;
+    font-size: 12px;
+  }
+
+  .busy-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(6, 7, 12, .72);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 999;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid rgba(255,255,255,.15);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .busy-overlay p { color: var(--text); font-size: 14px; margin: 0; }
+
+  @media (max-width: 760px) {
+    .speed-divider { display: none; }
+    .speed-label { min-width: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Quaver <span class="arrow">→</span> osu!mania</h1>
+    <p class="sub">
+      Drop a <code>.qua</code> file, a <code>.qp</code> pack, or a whole map folder.
+      Key count (1K–18K, including 10K), audio, background, SV changes, BPM, artist,
+      title, charter, and difficulty name are all preserved. Output is a ready-to-play <code>.osz</code>.
+      Optionally change the speed (0.5×–2×) with or without pitch scaling — audio, BPM, notes and SV all scale together.
+    </p>
+  </header>
+
+  <section class="dropzone" id="dropzone">
+    <div class="dz-icon">⇩</div>
+    <div class="dz-title">Drop files or a folder here</div>
+    <div class="dz-sub">.qua · .qp · .qzp · .zip — or a folder with audio + background</div>
+    <div class="dz-buttons">
+      <button class="btn" id="pickFiles" type="button">📄 Choose files</button>
+      <button class="btn ghost" id="pickFolder" type="button">📁 Choose folder</button>
+    </div>
+    <input type="file" id="fileInput" multiple
+           accept=".qua,.qp,.qzp,.zip,.mp3,.ogg,.wav,.m4a,.flac,.png,.jpg,.jpeg,.gif,.bmp,.webp" hidden>
+    <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+  </section>
+
+  <section class="speed-panel" id="speedPanel">
+    <div class="speed-group grow">
+      <div class="speed-label">
+        <span class="speed-title">Speed</span>
+        <span class="speed-hint">0.50× – 2.00× · steps of 0.05×</span>
+      </div>
+      <input type="range" id="speedSlider" class="speed-slider"
+             min="0.5" max="2" step="0.05" value="1" aria-label="Speed multiplier">
+      <div class="speed-input-wrap">
+        <input type="number" id="speedNumber" class="speed-num"
+               min="0.5" max="2" step="0.05" value="1" aria-label="Speed multiplier value">
+        <span class="speed-x">×</span>
+      </div>
+      <button class="btn ghost" id="speedReset" type="button">Reset</button>
+    </div>
+
+    <div class="speed-divider" aria-hidden="true"></div>
+
+    <div class="speed-group">
+      <label class="switch" for="pitchToggle" title="When on, the pitch rises/falls along with the speed. When off, the pitch stays the same and only the tempo changes.">
+        <input type="checkbox" id="pitchToggle" checked>
+        <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+        <span class="switch-text">
+          <span class="switch-title">Pitch scales with speed</span>
+          <span class="switch-hint" id="pitchHint">On · pitch scales with rate</span>
+        </span>
+      </label>
+      <button class="btn preview" id="previewBtn" type="button" disabled>▶ Play Preview</button>
+    </div>
+  </section>
+
+  <div class="status" id="status"></div>
+
+  <div class="toolbar hidden" id="toolbar">
+    <h2 id="mapCount">0 maps</h2>
+    <div style="display:flex; gap:9px; flex-wrap:wrap;">
+      <button class="btn primary" id="convertAll" type="button">Convert all → .osz</button>
+      <button class="btn ghost" id="clearAll" type="button">Clear</button>
+    </div>
+  </div>
+
+  <section class="maps" id="maps"></section>
+
+  <footer>
+    Conversion happens entirely in your browser — nothing is uploaded anywhere.
+    <br>
+    <strong>Tip:</strong> drop the <em>whole map folder</em> so audio + background get bundled
+    into the <code>.osz</code> automatically. SV changes, BPM changes, and long notes all carry over.
+    <br>
+    <strong>Speed:</strong> anything other than 1× re-encodes the audio (MP3 when available, otherwise WAV),
+    scales BPM and every timestamp. The title gets <code>(1.5x Speed)</code> and the difficulty gets
+    <code>(Sped Up / 1.5x)</code> or <code>(Slowed Down / 0.75x)</code> appended.
+    <br>
+    <strong>Pitch:</strong> with the switch on, pitch scales with the rate (nightcore/slowed style).
+    With it off, the tempo changes but the pitch stays constant (time-stretch).
+    <br>
+    <strong>BPM:</strong> read from Quaver timing points first, then the top-level <code>BPM</code> field,
+    then auto-detected from note spacing if both are missing. No more blind 120 BPM defaults.
+    <br>
+    <strong>Preview:</strong> uses the first loaded map's audio. If there's no audio, the button is disabled.
+    <br>
+    <strong>Lane indexing:</strong> both 0-indexed and 1-indexed <code>.qua</code> files are
+    auto-detected and shifted so the playfield lines up in osu!mania.
+  </footer>
+
+</div>
+
+<div class="busy-overlay hidden" id="busy">
+  <div class="spinner"></div>
+  <p id="busyText">Working…</p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* =========================================================
+     Constants & helpers
+     ========================================================= */
+
+  const MANIA_Y = 192;
+  const PLAYFIELD_W = 512;
+  const MAX_KEYS = 18;
+
+  const MIN_RATE = 0.5;
+  const MAX_RATE = 2;
+  const RATE_STEP = 0.05;
+
+  const HITSOUND_NAMES = {
+    normal: 0, clap: 8, whistle: 2, finish: 4,
+    hitnormal: 0, hitclap: 8, hitwhistle: 2, hitfinish: 4
+  };
+
+  const AUDIO_EXTS = ["mp3", "ogg", "wav", "m4a", "flac"];
+  const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function fmtNum(n) {
+    if (!isFinite(n)) return "0";
+    var s = Number(n).toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+    if (s === "" || s === "-0") s = "0";
+    return s;
+  }
+
+  function fmtTime(n) { return String(Math.round(Number(n) || 0)); }
+
+  /** Format a speed multiplier for display: 1.5 -> "1.5", 2 -> "2", 0.75 -> "0.75". */
+  function fmtRate(r) {
+    var v = Math.round(Number(r) * 100) / 100;
+    if (!isFinite(v)) v = 1;
+    return String(v);
+  }
+
+  /** Nice BPM formatting: 180 -> "180", 174.5 -> "174.5", 133.333 -> "133.33". */
+  function fmtBpm(b) {
+    if (!isFinite(b) || b <= 0) return "—";
+    var rounded = Math.round(b * 100) / 100;
+    if (Math.abs(rounded - Math.round(rounded)) < 0.005) {
+      return String(Math.round(rounded));
+    }
+    return String(rounded);
+  }
+
+  function sanitizeFilename(name) {
+    return String(name || "map")
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 180) || "map";
+  }
+
+  function downloadBlob(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Give the browser time to start the download before revoking.
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+  }
+
+  function formatLength(ms) {
+    if (!isFinite(ms) || ms <= 0) return "—";
+    var total = Math.round(ms / 1000);
+    var m = Math.floor(total / 60);
+    var s = total % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+
+  function hitsoundBits(v) {
+    if (typeof v === "number" && isFinite(v)) return Math.abs(v) & 15;
+    if (typeof v === "string") {
+      var key = v.trim().toLowerCase().replace(/[\s_-]/g, "");
+      if (key in HITSOUND_NAMES) return HITSOUND_NAMES[key];
+    }
+    return 0;
+  }
+
+  function getExt(name) {
+    var m = String(name || "").match(/\.([a-z0-9]+)$/i);
+    return m ? m[1].toLowerCase() : "";
+  }
+
+  function isAudio(name) { return AUDIO_EXTS.indexOf(getExt(name)) !== -1; }
+  function isImage(name) { return IMAGE_EXTS.indexOf(getExt(name)) !== -1; }
+
+  /* =========================================================
+     Speed / pitch state
+     ========================================================= */
+
+  var speedRate = 1;      // global multiplier applied on export
+  var pitchShift = true;  // true = pitch scales with rate, false = pitch preserved
+
+  var MP3_OK = (typeof lamejs !== "undefined" && lamejs &&
+                typeof lamejs.Mp3Encoder === "function");
+
+  function speedTitleSuffix(rate) {
+    return " (" + fmtRate(rate) + "x Speed)";
+  }
+  function speedVersionSuffix(rate) {
+    if (rate > 1) return " (Sped Up / " + fmtRate(rate) + "x)";
+    if (rate < 1) return " (Slowed Down / " + fmtRate(rate) + "x)";
+    return "";
+  }
+
+  function displayTitle(map) {
+    var t = (map.data && map.data.Title) || map.meta.title || "Untitled";
+    return speedRate === 1 ? t : t + speedTitleSuffix(speedRate);
+  }
+
+  function displayVersion(map) {
+    var v = (map.data && map.data.DifficultyName) || map.meta.difficultyName || "Normal";
+    return speedRate === 1 ? v : v + speedVersionSuffix(speedRate);
+  }
+
+  /** Name that the (possibly re-encoded) audio file will have inside the .osz */
+  function exportAudioName(map) {
+    if (!map.audioFile) return null;
+    if (speedRate === 1) return map.audioFile.name;
+    var base = String(map.audioFile.name).replace(/\.[a-z0-9]+$/i, "") || "audio";
+    return base + (MP3_OK ? ".mp3" : ".wav");
+  }
+
+  /* =========================================================
+     Busy overlay with reference counting
+     ========================================================= */
+
+  var busyCount = 0;
+
+  function setBusy(on, text) {
+    var el = document.getElementById("busy");
+    if (on) {
+      busyCount++;
+      document.getElementById("busyText").textContent = text || "Working…";
+      el.classList.remove("hidden");
+    } else {
+      busyCount = Math.max(0, busyCount - 1);
+      if (busyCount === 0) el.classList.add("hidden");
+    }
+  }
+
+  function setBusyText(text) {
+    if (busyCount > 0) document.getElementById("busyText").textContent = text;
+  }
+
+  /* =========================================================
+     Quaver parsing
+     ========================================================= */
+
+  /**
+   * Determine the key count.
+   *
+   * Priority:
+   *   1. Explicit KeyCount field
+   *   2. Mode string ("Keys10", "10K", "10")
+   *   3. Lane analysis — handles both 0-indexed (0..N-1) and
+   *      1-indexed (1..N) lane numbering.
+   */
+  function deriveKeyCount(data) {
+    // Explicit KeyCount wins.
+    if (isFinite(data.KeyCount) && data.KeyCount > 0) {
+      return clampKeys(Math.round(data.KeyCount));
+    }
+
+    // Mode string like "Keys4", "Keys7", "Keys10", "10K", "10"
+    if (typeof data.Mode === "string") {
+      var m = data.Mode.match(/(\d+)/);
+      if (m) {
+        var n = parseInt(m[1], 10);
+        if (n >= 1 && n <= MAX_KEYS) return n;
+      }
+    }
+    // Mode as a raw number (some tools write this).
+    // Avoid interpreting 1/2 (Quaver enum for Keys4/Keys7) as key counts;
+    // only trust numbers ≥ 3 that are plausible key counts.
+    if (typeof data.Mode === "number" && isFinite(data.Mode)) {
+      var mn = Math.round(data.Mode);
+      if (mn >= 3 && mn <= MAX_KEYS) return mn;
+    }
+
+    // Fall back to lane analysis.
+    var objs = Array.isArray(data.HitObjects) ? data.HitObjects : [];
+    var minLane = Infinity, maxLane = -1;
+    for (var i = 0; i < objs.length; i++) {
+      var lane = Number(objs[i] && objs[i].Lane);
+      if (isFinite(lane)) {
+        if (lane < minLane) minLane = lane;
+        if (lane > maxLane) maxLane = lane;
+      }
+    }
+    if (maxLane >= 0) {
+      // 1-indexed lanes: {1..N} → N keys
+      if (minLane >= 1) return clampKeys(maxLane);
+      // 0-indexed lanes: {0..N-1} → N keys
+      return clampKeys(maxLane + 1);
+    }
+
+    return 4;
+  }
+
+  function clampKeys(n) {
+    if (!isFinite(n) || n < 1) return 4;
+    return Math.min(MAX_KEYS, Math.max(1, Math.round(n)));
+  }
+
+  function normalizeTags(tags) {
+    if (!tags) return "";
+    if (Array.isArray(tags)) {
+      return tags.map(function (t) { return String(t).trim(); })
+                 .filter(Boolean)
+                 .join(" ");
+    }
+    return String(tags).trim();
+  }
+
+  function extractNotes(data, keyCount) {
+    var objs = Array.isArray(data.HitObjects) ? data.HitObjects : [];
+    var notes = [];
+
+    for (var i = 0; i < objs.length; i++) {
+      var o = objs[i];
+      if (!o || typeof o !== "object") continue;
+
+      var lane = Number(o.Lane);
+      var start = Number(o.StartTime);
+      if (!isFinite(lane) || !isFinite(start)) continue;
+      // Allow lanes up to keyCount (inclusive) so 1-indexed data survives.
+      if (lane < 0 || lane > keyCount + 1) continue;
+
+      var end = Number(o.EndTime);
+      var isHold = isFinite(end) && end > start;
+
+      notes.push({
+        lane: Math.round(lane),
+        start: Math.max(0, Math.round(start)),
+        end: isHold ? Math.max(0, Math.round(end)) : null,
+        sound: hitsoundBits(o.HitSound != null ? o.HitSound : o.Hitsound)
+      });
+    }
+
+    notes.sort(function (a, b) { return a.start - b.start || a.lane - b.lane; });
+    return notes;
+  }
+
+  /**
+   * Detect 1-indexed lane numbering and return the amount to shift lanes down.
+   */
+  function detectLaneOffset(notes, keyCount) {
+    if (!notes.length || keyCount < 2) return 0;
+
+    var minLane = Infinity, maxLane = -1;
+    for (var i = 0; i < notes.length; i++) {
+      if (notes[i].lane < minLane) minLane = notes[i].lane;
+      if (notes[i].lane > maxLane) maxLane = notes[i].lane;
+    }
+
+    if (maxLane >= keyCount) return 1;   // definitely 1-indexed
+    if (minLane === 1) return 1;         // almost certainly 1-indexed
+    return 0;
+  }
+
+  /* =========================================================
+     BPM detection
+     ========================================================= */
+
+  /**
+   * Parse the raw TimingPoints array into a clean list of BPM points.
+   * Returns [] when the file has no usable (uninherited) timing points.
+   * Inherited / SV points have BPM 0 or missing and are filtered out.
+   */
+  function parseTimingPoints(data) {
+    var src = Array.isArray(data.TimingPoints) ? data.TimingPoints : [];
+    var tps = [];
+
+    for (var i = 0; i < src.length; i++) {
+      var tp = src[i];
+      if (!tp) continue;
+      var t = Number(tp.StartTime);
+      var bpm = Number(tp.BPM);
+      if (!isFinite(t) || !isFinite(bpm) || bpm <= 0) continue;
+      var sig = Number(tp.Signature);
+      tps.push({
+        time: t,
+        bpm: bpm,
+        meter: (isFinite(sig) && sig > 0) ? Math.round(sig) : 4
+      });
+    }
+
+    tps.sort(function (a, b) { return a.time - b.time; });
+    return tps;
+  }
+
+  /**
+   * Pick the "main" BPM out of a set of timing points.
+   * Uses the most frequently occurring BPM, breaking ties toward the
+   * earliest occurrence (which is usually the song's base BPM).
+   */
+  function mainBpmFromTimingPoints(tps) {
+    if (!tps || !tps.length) return 0;
+
+    var counts = {};
+    var order = [];
+
+    for (var i = 0; i < tps.length; i++) {
+      var key = Math.round(tps[i].bpm * 100) / 100;
+      if (!counts[key]) {
+        counts[key] = { count: 0, firstIndex: i };
+        order.push(key);
+      }
+      counts[key].count++;
+    }
+
+    var bestBpm = 0;
+    var bestCount = -1;
+    var bestFirst = Infinity;
+
+    for (var j = 0; j < order.length; j++) {
+      var b = order[j];
+      var c = counts[b];
+      if (c.count > bestCount || (c.count === bestCount && c.firstIndex < bestFirst)) {
+        bestCount = c.count;
+        bestFirst = c.firstIndex;
+        bestBpm = b;
+      }
+    }
+
+    return bestBpm;
+  }
+
+  /**
+   * Auto-detect BPM from note onset spacing.
+   *
+   * 1. Collect the unique note start times (chords collapse to one).
+   * 2. Build an interval histogram (5 ms bins), ignoring gaps > 1.5 s
+   *    and < 20 ms (chord flams / duplicates).
+   * 3. Score every candidate BPM from 60–300 in 0.5 steps by counting
+   *    how many interval bins land on that BPM's grid at any of the
+   *    usual subdivisions (1/1 … 1/16).
+   * 4. Return the best-scoring BPM, or 0 if the fit is too weak.
+   *
+   * Returns 0 when detection is unreliable (too few notes, no clear grid).
+   */
+  function detectBpmFromNotes(notes) {
+    if (!notes || notes.length < 8) return 0;
+
+    // 1. Unique sorted start times
+    var times = [];
+    var seen = {};
+    for (var i = 0; i < notes.length; i++) {
+      var t = notes[i].start;
+      if (!seen[t]) { seen[t] = 1; times.push(t); }
+    }
+    times.sort(function (a, b) { return a - b; });
+
+    if (times.length < 6) return 0;
+
+    // 2. Interval histogram (5 ms bins)
+    var hist = {};
+    var totalWeight = 0;
+    for (var i = 1; i < times.length; i++) {
+      var d = times[i] - times[i - 1];
+      if (d < 20 || d > 1500) continue;
+      var bin = Math.round(d / 5) * 5;
+      hist[bin] = (hist[bin] || 0) + 1;
+      totalWeight++;
+    }
+
+    var bins = Object.keys(hist).map(Number);
+    if (bins.length < 3 || totalWeight < 4) return 0;
+
+    // 3. Score candidate BPMs
+    var subdivisions = [1, 2, 3, 4, 6, 8, 12, 16];
+    var bestBpm = 0;
+    var bestScore = -1;
+
+    for (var bpm = 60; bpm <= 300; bpm += 0.5) {
+      var beatMs = 60000 / bpm;
+      var score = 0;
+
+      for (var j = 0; j < bins.length; j++) {
+        var bin = bins[j];
+        var matched = 0;
+
+        for (var s = 0; s < subdivisions.length; s++) {
+          var subMs = beatMs / subdivisions[s];
+          if (subMs < 15) continue; // too fine, skip
+
+          var ratio = bin / subMs;
+          var rounded = Math.round(ratio);
+          if (rounded < 1) continue;
+
+          var expected = rounded * subMs;
+          if (Math.abs(bin - expected) <= subMs * 0.12) {
+            matched = 1;
+            break;
+          }
+        }
+
+        if (matched) score += hist[bin];
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestBpm = bpm;
+      }
+    }
+
+    // 4. Reject weak fits
+    if (bestScore < totalWeight * 0.45) return 0;
+    return bestBpm;
+  }
+
+  /**
+   * Derive the map's primary BPM using the best available source.
+   *
+   * Order of preference:
+   *   1. Timing points (they define the real grid the map plays on)
+   *   2. Top-level BPM field (metadata, usually mirrors timing points)
+   *   3. Auto-detection from note spacing
+   *   4. 120 as an absolute last resort
+   *
+   * Returns { bpm, source, detected, changes } where:
+   *   - source: "timing" | "top-level" | "notes" | "default"
+   *   - detected: true if we had to guess (notes / default)
+   *   - changes: number of BPM changes in the timing points
+   */
+  function deriveBpm(data, notes, parsedTps) {
+    if (parsedTps && parsedTps.length) {
+      var main = mainBpmFromTimingPoints(parsedTps);
+      if (main > 0) {
+        return {
+          bpm: main,
+          source: "timing",
+          detected: false,
+          changes: Math.max(0, parsedTps.length - 1)
+        };
+      }
+    }
+
+    var topBpm = Number(data.BPM);
+    if (isFinite(topBpm) && topBpm > 0) {
+      return { bpm: topBpm, source: "top-level", detected: false, changes: 0 };
+    }
+
+    var detectedBpm = detectBpmFromNotes(notes);
+    if (detectedBpm > 0) {
+      return { bpm: detectedBpm, source: "notes", detected: true, changes: 0 };
+    }
+
+    return { bpm: 120, source: "default", detected: true, changes: 0 };
+  }
+
+  /**
+   * Materialise a timing-point list ready for the .osu writer.
+   * Always guarantees at least one point at t=0.
+   */
+  function buildOutputTimingPoints(parsedTps, fallbackBpm) {
+    var tps = parsedTps && parsedTps.length
+      ? parsedTps.slice()
+      : [{ time: 0, bpm: fallbackBpm || 120, meter: 4 }];
+
+    if (tps[0].time > 0) {
+      tps.unshift({
+        time: 0,
+        bpm: tps[0].bpm,
+        meter: tps[0].meter || 4
+      });
+    }
+    return tps;
+  }
+
+  function buildSvPoints(data) {
+    var src = Array.isArray(data.SliderVelocities) ? data.SliderVelocities : [];
+    var svs = [];
+    for (var i = 0; i < src.length; i++) {
+      var sv = src[i];
+      if (!sv) continue;
+      var t = Number(sv.StartTime);
+      var mult = Number(sv.Multiplier);
+      if (!isFinite(t) || !isFinite(mult) || mult <= 0) continue;
+      svs.push({ time: t, multiplier: mult });
+    }
+    svs.sort(function (a, b) { return a.time - b.time; });
+    return svs;
+  }
+
+  /* =========================================================
+     Audio rendering
+     ---------------------------------------------------------
+     Two modes:
+       * pitched  → OfflineAudioContext with playbackRate, so pitch
+                    scales with the rate (fast + high, slow + low).
+       * unpitched → decode, then WSOLA time-stretch per channel,
+                    preserving pitch while changing tempo.
+     ========================================================= */
+
+  function floatTo16(input) {
+    var out = new Int16Array(input.length);
+    for (var i = 0; i < input.length; i++) {
+      var s = input[i];
+      if (s > 1) s = 1; else if (s < -1) s = -1;
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return out;
+  }
+
+  function decodeAudioBuffer(arrayBuf, sampleRate) {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return Promise.reject(new Error("Web Audio API is unavailable in this browser."));
+
+    var ctx;
+    try { ctx = sampleRate ? new AC({ sampleRate: sampleRate }) : new AC(); }
+    catch (e) { ctx = new AC(); }
+
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      function ok(b) { if (!settled) { settled = true; resolve(b); } }
+      function no(err) {
+        if (!settled) {
+          settled = true;
+          reject(err || new Error("Could not decode the audio file."));
+        }
+      }
+      var res;
+      try { res = ctx.decodeAudioData(arrayBuf, ok, no); }
+      catch (e) { return no(e); }
+      if (res && typeof res.then === "function") res.then(ok, no);
+    }).finally(function () {
+      try { if (ctx.close) ctx.close(); } catch (e) {}
+    });
+  }
+
+  /**
+   * WSOLA time-stretch for one channel.
+   * `rate` > 1 → faster / shorter output. `rate` < 1 → slower / longer output.
+   * Pitch is preserved.
+   */
+  function timeStretchChannel(input, rate) {
+    if (Math.abs(rate - 1) < 0.001) {
+      return input.slice();
+    }
+
+    var frameSize = 4096;
+    var hopOut = frameSize >> 1;                     // 2048
+    var hopIn = Math.max(1, Math.round(hopOut * rate));
+    var overlap = frameSize - hopOut;                // 2048
+    var searchRadius = Math.max(16, Math.min(128, Math.round(hopIn * 0.2)));
+
+    // Hann window
+    var win = new Float32Array(frameSize);
+    for (var i = 0; i < frameSize; i++) {
+      win[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (frameSize - 1)));
+    }
+
+    var estLen = Math.ceil(input.length / rate) + frameSize * 2;
+    var output = new Float32Array(estLen);
+    var norm = new Float32Array(estLen);
+    var lastWritten = 0;
+
+    function addFrame(srcPos, dstPos) {
+      var wStart = Math.max(0, -srcPos);
+      var wEnd = Math.min(frameSize, input.length - srcPos);
+      if (wEnd <= wStart) return;
+      for (var i = wStart; i < wEnd; i++) {
+        var di = dstPos + i;
+        if (di < 0 || di >= estLen) continue;
+        output[di] += input[srcPos + i] * win[i];
+        norm[di] += win[i];
+        if (di + 1 > lastWritten) lastWritten = di + 1;
+      }
+    }
+
+    // First frame
+    addFrame(0, 0);
+
+    var prevInPos = 0;
+    var inPos = hopIn;
+    var outPos = hopOut;
+    var safety = 0;
+
+    while (inPos + frameSize <= input.length + searchRadius &&
+           outPos < estLen && safety++ < 200000) {
+
+      // WSOLA alignment search against the previous frame's tail
+      var templateStart = prevInPos + hopOut;
+      var tLen = Math.min(overlap, input.length - templateStart);
+
+      var bestD = 0;
+      if (tLen > 0) {
+        var bestScore = -Infinity;
+        for (var d = -searchRadius; d <= searchRadius; d++) {
+          var candStart = inPos + d;
+          if (candStart < 0 || candStart + tLen > input.length) continue;
+
+          var num = 0, den1 = 0, den2 = 0;
+          for (var k = 0; k < tLen; k += 32) {
+            var a = input[candStart + k];
+            var b = input[templateStart + k];
+            num += a * b;
+            den1 += a * a;
+            den2 += b * b;
+          }
+          var score = num / (Math.sqrt(den1 * den2) + 1e-9);
+          if (score > bestScore) {
+            bestScore = score;
+            bestD = d;
+          }
+        }
+      }
+
+      var actualInPos = Math.max(0, inPos + bestD);
+      addFrame(actualInPos, outPos);
+
+      prevInPos = actualInPos;
+      inPos += hopIn;
+      outPos += hopOut;
+    }
+
+    // Normalise by the accumulated window sum
+    for (var i = 0; i < lastWritten; i++) {
+      if (norm[i] > 0.0001) output[i] /= norm[i];
+    }
+
+    return output.subarray(0, lastWritten);
+  }
+
+  function bufferToPlain(buf) {
+    var channels = [];
+    for (var c = 0; c < buf.numberOfChannels; c++) {
+      channels.push(buf.getChannelData(c));
+    }
+    return {
+      sampleRate: buf.sampleRate,
+      numberOfChannels: buf.numberOfChannels,
+      length: buf.length,
+      channels: channels
+    };
+  }
+
+  async function renderPitchedBuffer(decoded, rate) {
+    var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OAC) throw new Error("Offline audio rendering is unavailable in this browser.");
+
+    var outRate = 44100;
+    var outChannels = Math.max(1, Math.min(2, decoded.numberOfChannels || 2));
+    var outLength = Math.max(1, Math.ceil((decoded.duration / rate) * outRate));
+
+    var off;
+    try {
+      off = new OAC({
+        numberOfChannels: outChannels,
+        length: outLength,
+        sampleRate: outRate
+      });
+    } catch (e) {
+      off = new OAC(outChannels, outLength, outRate);
+    }
+
+    var source = off.createBufferSource();
+    source.buffer = decoded;
+    source.playbackRate.value = rate;
+    source.connect(off.destination);
+    source.start(0);
+
+    var rendered = await off.startRendering();
+    return bufferToPlain(rendered);
+  }
+
+  function timeStretchBuffer(decoded, rate) {
+    var outChannels = Math.max(1, Math.min(2, decoded.numberOfChannels || 2));
+    var channels = [];
+    var minLen = Infinity;
+
+    for (var c = 0; c < outChannels; c++) {
+      var ch = timeStretchChannel(decoded.getChannelData(c), rate);
+      channels.push(ch);
+      if (ch.length < minLen) minLen = ch.length;
+    }
+
+    if (!isFinite(minLen)) minLen = 0;
+    for (var c = 0; c < channels.length; c++) {
+      if (channels[c].length !== minLen) {
+        channels[c] = channels[c].subarray(0, minLen);
+      }
+    }
+
+    return {
+      sampleRate: decoded.sampleRate,
+      numberOfChannels: outChannels,
+      length: minLen,
+      channels: channels
+    };
+  }
+
+  /**
+   * Decode `file`, then render it at `rate` with or without pitch scaling.
+   * Returns a plain buffer object: { sampleRate, numberOfChannels, length, channels[] }.
+   */
+  async function renderAudio(file, rate, pitched) {
+    if (!(window.AudioContext || window.webkitAudioContext)) {
+      throw new Error("Web Audio API is unavailable in this browser.");
+    }
+
+    var arrayBuf = await file.arrayBuffer();
+    var decoded = await decodeAudioBuffer(arrayBuf, 44100);
+
+    if (!decoded) throw new Error("Could not decode the audio file.");
+
+    if (pitched) {
+      return await renderPitchedBuffer(decoded, rate);
+    }
+    return timeStretchBuffer(decoded, rate);
+  }
+
+  /* ---------- Encoders (accept the plain buffer object) ---------- */
+
+  function encodeWav(buf) {
+    var numCh = buf.numberOfChannels;
+    var sr = buf.sampleRate;
+    var chans = buf.channels;
+    var len = buf.length;
+    var blockAlign = numCh * 2;
+    var dataSize = len * blockAlign;
+
+    var ab = new ArrayBuffer(44 + dataSize);
+    var dv = new DataView(ab);
+    var o = 0;
+
+    function str(s) { for (var i = 0; i < s.length; i++) dv.setUint8(o++, s.charCodeAt(i)); }
+    function u32(v) { dv.setUint32(o, v, true); o += 4; }
+    function u16(v) { dv.setUint16(o, v, true); o += 2; }
+
+    str("RIFF"); u32(36 + dataSize); str("WAVE");
+    str("fmt "); u32(16); u16(1); u16(numCh); u32(sr);
+    u32(sr * blockAlign); u16(blockAlign); u16(16);
+    str("data"); u32(dataSize);
+
+    for (var i = 0; i < len; i++) {
+      for (var ch = 0; ch < numCh; ch++) {
+        var s = chans[ch][i];
+        if (s > 1) s = 1; else if (s < -1) s = -1;
+        dv.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        o += 2;
+      }
+    }
+
+    return new Blob([ab], { type: "audio/wav" });
+  }
+
+  function encodeMp3(buf) {
+    if (!MP3_OK) throw new Error("MP3 encoder unavailable.");
+    var channels = Math.max(1, Math.min(2, buf.numberOfChannels));
+    var sampleRate = buf.sampleRate;
+    var encoder = new lamejs.Mp3Encoder(channels, sampleRate, 192);
+
+    var left = floatTo16(buf.channels[0]);
+    var right = channels > 1 ? floatTo16(buf.channels[1]) : null;
+
+    var blockSize = 1152;
+    var parts = [];
+
+    for (var i = 0; i < left.length; i += blockSize) {
+      var l = left.subarray(i, i + blockSize);
+      var chunk;
+      if (right) {
+        var r = right.subarray(i, i + blockSize);
+        chunk = encoder.encodeBuffer(l, r);
+      } else {
+        chunk = encoder.encodeBuffer(l);
+      }
+      if (chunk.length > 0) parts.push(new Uint8Array(chunk));
+    }
+
+    var tail = encoder.flush();
+    if (tail.length > 0) parts.push(new Uint8Array(tail));
+
+    return new Blob(parts, { type: "audio/mpeg" });
+  }
+
+  /**
+   * Returns { name, blob } for the audio that should land in the .osz,
+   * or null when the map has no audio sidecar.
+   */
+  async function prepareAudio(map, rate, pitched) {
+    var file = map.audioFile;
+    if (!file) return null;
+    if (rate === 1) return { name: file.name, blob: file };
+
+    var verb = rate > 1 ? "Speeding up" : "Slowing down";
+    setBusyText(verb + " audio (" + fmtRate(rate) + "× · " +
+                (pitched ? "pitched" : "constant pitch") + ")…");
+
+    var rendered = await renderAudio(file, rate, pitched);
+
+    var base = String(file.name).replace(/\.[a-z0-9]+$/i, "") || "audio";
+
+    if (MP3_OK) {
+      try {
+        setBusyText("Encoding MP3…");
+        return { name: base + ".mp3", blob: encodeMp3(rendered) };
+      } catch (err) {
+        console.warn("MP3 encoding failed, falling back to WAV:", err);
+      }
+    }
+
+    setBusyText("Encoding WAV…");
+    return { name: base + ".wav", blob: encodeWav(rendered) };
+  }
+
+  /* =========================================================
+     osu!mania writer
+     ========================================================= */
+
+  function buildOsuText(map, audioNameOverride) {
+    var d = map.data;
+    var keys = map.meta.keyCount;
+    var laneOffset = map.laneOffset || 0;
+    var notes = map.notes;
+    var rate = speedRate;
+    var L = [];
+
+    function push() { for (var i = 0; i < arguments.length; i++) L.push(arguments[i]); }
+
+    var audioFilename =
+      audioNameOverride ||
+      exportAudioName(map) ||
+      (d.AudioFile ? String(d.AudioFile) : "audio.mp3");
+
+    var bgFilename = map.bgFile ? map.bgFile.name
+                   : (d.BackgroundFile ? String(d.BackgroundFile) : "");
+
+    push("osu file format v14", "");
+
+    /* ---- [General] ---- */
+    var previewRaw = Number(d.PreviewTime);
+    push("[General]");
+    push("AudioFilename: " + audioFilename);
+    push("AudioLeadIn: 0");
+    push("PreviewTime: " + (isFinite(previewRaw) ? Math.max(0, Math.round(previewRaw / rate)) : -1));
+    push("Countdown: 0");
+    push("SampleSet: Normal");
+    push("StackLeniency: 0.7");
+    push("Mode: 3");                       // 3 = osu!mania
+    push("LetterboxInBreaks: 0");
+    push("SpecialStyle: 0");
+    push("WidescreenStoryboard: 0");
+    push("");
+
+    /* ---- [Editor] ---- */
+    push("[Editor]");
+    push("DistanceSpacing: 1");
+    push("BeatDivisor: 4");
+    push("GridSize: 4");
+    push("TimelineZoom: 1");
+    push("");
+
+    /* ---- [Metadata] ---- */
+    var title   = d.Title || "Untitled";
+    var artist  = d.Artist || "Unknown Artist";
+    var creator = d.Creator || "Unknown";
+    var version = d.DifficultyName || "Normal";
+
+    if (rate !== 1) {
+      title   = title + speedTitleSuffix(rate);
+      version = version + speedVersionSuffix(rate);
+    }
+
+    var tags = normalizeTags(d.Tags);
+    if (rate !== 1) {
+      var speedTag = rate > 1 ? "speed up sped up" : "slow down slowed";
+      tags = (tags ? tags + " " : "") +
+             speedTag + " " + fmtRate(rate) + "x " +
+             (pitchShift ? "pitched" : "pitch preserved");
+    }
+
+    push("[Metadata]");
+    push("Title:" + title);
+    push("TitleUnicode:" + title);
+    push("Artist:" + artist);
+    push("ArtistUnicode:" + artist);
+    push("Creator:" + creator);
+    push("Version:" + version);
+    push("Source:" + (d.Source || ""));
+    push("Tags:" + tags);
+    push("BeatmapID:0");
+    push("BeatmapSetID:-1");
+    push("");
+
+    /* ---- [Difficulty] ---- */
+    push("[Difficulty]");
+    push("HPDrainRate:8");
+    push("CircleSize:" + keys);            // <<< KEY COUNT PRESERVED (1..18)
+    push("OverallDifficulty:8");
+    push("ApproachRate:5");
+    push("SliderMultiplier:1.4");
+    push("SliderTickRate:1");
+    push("");
+
+    /* ---- [Events] ---- */
+    push("[Events]");
+    push("//Background and Video events");
+    if (bgFilename) push('0,0,"' + bgFilename.replace(/"/g, "") + '",0,0');
+    push("//Break Periods");
+    push("//Storyboard Layer 0 (Background)");
+    push("//Storyboard Layer 1 (Fail)");
+    push("//Storyboard Layer 2 (Pass)");
+    push("//Storyboard Layer 3 (Foreground)");
+    push("//Storyboard Sound Samples");
+    push("");
+
+    /* ---- [TimingPoints] ---- */
+    push("[TimingPoints]");
+
+    var timingLines = [];
+    var tps = buildOutputTimingPoints(map.parsedTps, map.bpmInfo.bpm);
+
+    for (var i = 0; i < tps.length; i++) {
+      var tp = tps[i];
+      var t = tp.time / rate;
+      // Faster rate → higher BPM → shorter beat length (and vice-versa).
+      var beatLength = (60000 / tp.bpm) / rate;
+      timingLines.push({
+        time: t,
+        uninherited: 1,
+        line: fmtTime(t) + "," + fmtNum(beatLength) + "," + (tp.meter || 4) + ",2,1,60,1,0"
+      });
+    }
+
+    var svs = buildSvPoints(d);
+    for (var j = 0; j < svs.length; j++) {
+      var sv = svs[j];
+      var svTime = sv.time / rate;
+      // Multiplier is relative to the base scroll speed, so it stays as-is.
+      var svBeatLength = -100 / sv.multiplier;
+      timingLines.push({
+        time: svTime,
+        uninherited: 0,
+        line: fmtTime(svTime) + "," + fmtNum(svBeatLength) + ",4,2,1,60,0,0"
+      });
+    }
+
+    timingLines.sort(function (a, b) {
+      return a.time - b.time || b.uninherited - a.uninherited;
+    });
+
+    for (var k = 0; k < timingLines.length; k++) push(timingLines[k].line);
+    push("");
+
+    /* ---- [HitObjects] ---- */
+    push("[HitObjects]");
+    for (var n = 0; n < notes.length; n++) {
+      var note = notes[n];
+      var lane = note.lane - laneOffset;
+      if (lane < 0 || lane >= keys) continue;
+
+      var x = Math.floor((lane + 0.5) * PLAYFIELD_W / keys);
+      var start = Math.round(note.start / rate);
+
+      if (note.end !== null) {
+        var end = Math.round(note.end / rate);
+        if (end <= start) end = start + 1;
+        push(x + "," + MANIA_Y + "," + start + ",128," + note.sound +
+             "," + end + ":0:0:0:0:");
+      } else {
+        push(x + "," + MANIA_Y + "," + start + ",1," + note.sound + ",0:0:0:0:");
+      }
+    }
+
+    return L.join("\n") + "\n";
+  }
+
+  /* =========================================================
+     App state
+     ========================================================= */
+
+  var maps = [];
+  var uid = 0;
+
+  var dropzoneEl   = document.getElementById("dropzone");
+  var fileInputEl  = document.getElementById("fileInput");
+  var folderInputEl= document.getElementById("folderInput");
+  var pickFilesEl  = document.getElementById("pickFiles");
+  var pickFolderEl = document.getElementById("pickFolder");
+  var statusEl     = document.getElementById("status");
+  var mapsEl       = document.getElementById("maps");
+  var toolbarEl    = document.getElementById("toolbar");
+  var mapCountEl   = document.getElementById("mapCount");
+  var convertAllEl = document.getElementById("convertAll");
+  var clearAllEl   = document.getElementById("clearAll");
+
+  var speedSliderEl = document.getElementById("speedSlider");
+  var speedNumberEl = document.getElementById("speedNumber");
+  var speedResetEl  = document.getElementById("speedReset");
+
+  var pitchToggleEl = document.getElementById("pitchToggle");
+  var pitchHintEl   = document.getElementById("pitchHint");
+  var previewBtnEl  = document.getElementById("previewBtn");
+
+  function setStatus(msg, kind) {
+    statusEl.textContent = msg || "";
+    statusEl.className = "status" + (kind ? " " + kind : "");
+  }
+
+  /* =========================================================
+     Speed control
+     ========================================================= */
+
+  function clampRate(v) {
+    var n = Number(v);
+    if (!isFinite(n)) n = 1;
+    n = Math.min(MAX_RATE, Math.max(MIN_RATE, n));
+    return Math.round(n * 100) / 100;
+  }
+
+  function invalidateDerived() {
+    for (var i = 0; i < maps.length; i++) {
+      maps[i].osuText = null;
+      maps[i].oszBlob = null;
+      maps[i].oszRate = null;
+      maps[i].oszPitch = null;
+      maps[i].converted = false;
+      maps[i].error = null;
+    }
+    if (maps.length) render();
+  }
+
+  /**
+   * @param {number} value            raw speed value
+   * @param {boolean} fromNumberInput when true, don't overwrite the number field
+   *                                  (the user is still typing in it).
+   */
+  function applySpeed(value, fromNumberInput) {
+    var rate = clampRate(value);
+    var changed = rate !== speedRate;
+    speedRate = rate;
+
+    speedSliderEl.value = String(rate);
+    if (fromNumberInput !== true) speedNumberEl.value = fmtRate(rate);
+
+    if (changed) {
+      updatePreviewPlayback();
+      invalidateDerived();
+    }
+  }
+
+  function updatePitchHint() {
+    pitchHintEl.textContent = pitchShift
+      ? "On · pitch scales with rate"
+      : "Off · pitch stays constant";
+  }
+
+  speedSliderEl.addEventListener("input", function () {
+    applySpeed(Number(speedSliderEl.value), false);
+  });
+
+  speedNumberEl.addEventListener("input", function () {
+    var raw = speedNumberEl.value.trim();
+    if (raw === "" || raw === "-" || raw === ".") return;
+    var v = Number(raw);
+    if (!isFinite(v)) return;
+    applySpeed(v, true);   // keep whatever the user typed on screen
+  });
+
+  function commitNumberInput() {
+    var v = Number(speedNumberEl.value);
+    if (!isFinite(v) || speedNumberEl.value.trim() === "") v = speedRate;
+    applySpeed(v, false);  // normalises the displayed value
+  }
+
+  speedNumberEl.addEventListener("change", commitNumberInput);
+  speedNumberEl.addEventListener("blur", commitNumberInput);
+
+  speedResetEl.addEventListener("click", function () {
+    applySpeed(1, false);
+  });
+
+  pitchToggleEl.addEventListener("change", function () {
+    pitchShift = !!pitchToggleEl.checked;
+    updatePitchHint();
+    updatePreviewPlayback();
+    invalidateDerived();
+  });
+
+  /* =========================================================
+     Audio preview
+     ========================================================= */
+
+  var previewAudio = null;    // HTMLAudioElement
+  var previewUrl = null;      // object URL for the current preview
+  var previewFileRef = null;  // File the element was created from
+
+  function setPreservesPitch(audioEl, preserve) {
+    var props = ["preservesPitch", "mozPreservesPitch", "webkitPreservesPitch"];
+    for (var i = 0; i < props.length; i++) {
+      if (props[i] in audioEl) {
+        try { audioEl[props[i]] = preserve; } catch (e) {}
+      }
+    }
+  }
+
+  function getPreviewAudioFile() {
+    for (var i = 0; i < maps.length; i++) {
+      if (maps[i].audioFile) return maps[i].audioFile;
+    }
+    return null;
+  }
+
+  function updatePreviewPlayback() {
+    if (!previewAudio) return;
+    try {
+      previewAudio.playbackRate = speedRate;
+      setPreservesPitch(previewAudio, !pitchShift);
+    } catch (e) {}
+  }
+
+  function stopPreview() {
+    if (previewAudio) {
+      try { previewAudio.pause(); } catch (e) {}
+      try { previewAudio.currentTime = 0; } catch (e) {}
+    }
+    previewBtnEl.textContent = "▶ Play Preview";
+    previewBtnEl.classList.remove("playing");
+  }
+
+  function disposePreview() {
+    stopPreview();
+    if (previewAudio) {
+      try { previewAudio.src = ""; } catch (e) {}
+      previewAudio = null;
+    }
+    if (previewUrl) {
+      try { URL.revokeObjectURL(previewUrl); } catch (e) {}
+      previewUrl = null;
+    }
+    previewFileRef = null;
+  }
+
+  function updatePreviewAvailability() {
+    var file = getPreviewAudioFile();
+
+    if (!file) {
+      if (previewAudio) disposePreview();
+      previewBtnEl.disabled = true;
+      previewBtnEl.textContent = "▶ Play Preview";
+      previewBtnEl.classList.remove("playing");
+      previewBtnEl.title = "Load a map with an audio file to preview.";
+      return;
+    }
+
+    // If the source changed, drop the old element.
+    if (previewAudio && previewFileRef !== file) {
+      disposePreview();
+    }
+
+    previewBtnEl.disabled = false;
+    previewBtnEl.title = "Preview: " + file.name +
+      " (rate " + fmtRate(speedRate) + "×, " +
+      (pitchShift ? "pitched" : "constant pitch") + ")";
+  }
+
+  function playPreview() {
+    var file = getPreviewAudioFile();
+    if (!file) return;
+
+    if (!previewAudio || previewFileRef !== file) {
+      disposePreview();
+      previewUrl = URL.createObjectURL(file);
+      previewAudio = new Audio();
+      previewAudio.src = previewUrl;
+      previewAudio.preload = "auto";
+      previewAudio.addEventListener("ended", stopPreview);
+      previewAudio.addEventListener("error", function () {
+        setStatus("Could not load the audio for preview.", "err");
+        stopPreview();
+      });
+      previewFileRef = file;
+    }
+
+    // Apply current settings before starting.
+    try {
+      previewAudio.playbackRate = speedRate;
+      setPreservesPitch(previewAudio, !pitchShift);
+      previewAudio.currentTime = 0;
+    } catch (e) {}
+
+    var p;
+    try { p = previewAudio.play(); } catch (e) { p = Promise.reject(e); }
+    if (!p || typeof p.then !== "function") {
+      previewBtnEl.textContent = "■ Stop Preview";
+      previewBtnEl.classList.add("playing");
+      return;
+    }
+
+    p.then(function () {
+      previewBtnEl.textContent = "■ Stop Preview";
+      previewBtnEl.classList.add("playing");
+      previewBtnEl.title = "Preview: " + file.name +
+        " (rate " + fmtRate(speedRate) + "×, " +
+        (pitchShift ? "pitched" : "constant pitch") + ")";
+    }).catch(function (err) {
+      setStatus("Could not play preview: " + (err && err.message ? err.message : err), "err");
+      stopPreview();
+    });
+  }
+
+  previewBtnEl.addEventListener("click", function () {
+    if (previewAudio && !previewAudio.paused) {
+      stopPreview();
+    } else {
+      playPreview();
+    }
+  });
+
+  /* =========================================================
+     Folder / file collection
+     ========================================================= */
+
+  function tagRelativePath(file, path) {
+    try { file.__relPath = path || file.webkitRelativePath || file.name; }
+    catch (e) { /* some browsers may not allow extending File */ }
+    return file;
+  }
+
+  function walkEntry(entry, out, prefix) {
+    return new Promise(function (resolve) {
+      if (!entry) return resolve();
+
+      if (entry.isFile) {
+        entry.file(function (f) {
+          tagRelativePath(f, prefix + entry.name);
+          out.push(f);
+          resolve();
+        }, function () { resolve(); });
+        return;
+      }
+
+      if (entry.isDirectory) {
+        var reader = entry.createReader();
+        var all = [];
+        var readBatch = function () {
+          reader.readEntries(function (results) {
+            if (!results || !results.length) {
+              var chain = Promise.resolve();
+              all.forEach(function (child) {
+                chain = chain.then(function () {
+                  return walkEntry(child, out, prefix + entry.name + "/");
+                });
+              });
+              chain.then(resolve);
+              return;
+            }
+            for (var i = 0; i < results.length; i++) all.push(results[i]);
+            readBatch();
+          }, function () { resolve(); });
+        };
+        readBatch();
+        return;
+      }
+
+      resolve();
+    });
+  }
+
+  /**
+   * Extract File[] from a drag/drop DataTransfer.
+   *
+   * IMPORTANT: we call `webkitGetAsEntry()` synchronously inside the Promise
+   * executor, which runs synchronously during the drop event. This is required
+   * because DataTransfer items become invalid after the event handler returns.
+   */
+  function filesFromDataTransfer(dt) {
+    return new Promise(function (resolve) {
+      var out = [];
+      var items = dt.items;
+
+      if (!items || !items.length) {
+        var plain = dt.files ? Array.prototype.slice.call(dt.files) : [];
+        plain.forEach(function (f) { tagRelativePath(f, f.name); });
+        return resolve(plain);
+      }
+
+      var entries = [];
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        if (item.kind !== "file") continue;
+        var entry = null;
+        try { entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null; } catch (e) {}
+        if (entry) {
+          entries.push(entry);
+        } else if (item.getAsFile) {
+          var f = item.getAsFile();
+          if (f) { tagRelativePath(f, f.name); out.push(f); }
+        }
+      }
+
+      var chain = Promise.resolve();
+      entries.forEach(function (entry) {
+        chain = chain.then(function () { return walkEntry(entry, out, ""); });
+      });
+      chain.then(function () { resolve(out); });
+    });
+  }
+
+  /* =========================================================
+     Reading Quaver sources
+     ========================================================= */
+
+  async function readQuaSources(files) {
+    var sources = [];
+    var packErrors = [];
+    var extracted = [];   // Files pulled out of .qp/.zip archives
+
+    // Loose .qua files
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      if (/\.qua$/i.test(f.name)) {
+        try {
+          sources.push({
+            name: f.name,
+            path: f.__relPath || f.webkitRelativePath || f.name,
+            text: await f.text()
+          });
+        } catch (err) {
+          packErrors.push(f.name + ": " + err.message);
+        }
+      }
+    }
+
+    // .qp / .qzp / .zip archives
+    for (var j = 0; j < files.length; j++) {
+      var pf = files[j];
+      if (!/\.(qp|qzp|zip)$/i.test(pf.name)) continue;
+
+      if (typeof JSZip === "undefined") {
+        packErrors.push(pf.name + ": JSZip failed to load");
+        continue;
+      }
+
+      try {
+        var zip = await JSZip.loadAsync(pf);
+        var entries = Object.keys(zip.files).map(function (k) { return zip.files[k]; });
+
+        for (var k = 0; k < entries.length; k++) {
+          var entry = entries[k];
+          if (entry.dir) continue;
+
+          if (/\.qua$/i.test(entry.name)) {
+            try {
+              var text = await entry.async("string");
+              sources.push({
+                name: entry.name.split("/").pop(),
+                path: entry.name,
+                text: text
+              });
+            } catch (err) {
+              packErrors.push(entry.name + ": " + err.message);
+            }
+          } else if (isAudio(entry.name) || isImage(entry.name)) {
+            // Extract sidecar files so audio/bg get bundled even from .qp drops.
+            try {
+              var blob = await entry.async("blob");
+              var file = new File([blob], entry.name.split("/").pop(), { type: blob.type });
+              tagRelativePath(file, entry.name);
+              extracted.push(file);
+            } catch (err) { /* skip unreadable assets */ }
+          }
+        }
+      } catch (err) {
+        packErrors.push(pf.name + ": " + err.message);
+      }
+    }
+
+    return { sources: sources, errors: packErrors, extracted: extracted };
+  }
+
+  function buildSidecarIndex(files) {
+    var byFullPath = new Map();
+    var byBasename = new Map();
+
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      if (/\.(qua|qp|qzp|zip)$/i.test(f.name)) continue;
+
+      var full = (f.__relPath || f.webkitRelativePath || f.name).toLowerCase();
+      var base = f.name.toLowerCase();
+
+      if (!byFullPath.has(full)) byFullPath.set(full, f);
+      if (!byBasename.has(base)) byBasename.set(base, f);
+    }
+
+    return { byFullPath: byFullPath, byBasename: byBasename };
+  }
+
+  function findSidecar(index, filename) {
+    if (!filename) return null;
+    var key = String(filename).toLowerCase();
+    if (index.byFullPath.has(key)) return index.byFullPath.get(key);
+    var base = key.split("/").pop();
+    if (index.byBasename.has(base)) return index.byBasename.get(base);
+    return null;
+  }
+
+  function guessAudio(index) {
+    var found = null;
+    index.byBasename.forEach(function (f) {
+      if (!found && isAudio(f.name)) found = f;
+    });
+    return found;
+  }
+
+  function guessBackground(index) {
+    var found = null;
+    index.byBasename.forEach(function (f) {
+      if (!found && isImage(f.name)) found = f;
+    });
+    return found;
+  }
+
+  /* =========================================================
+     Building map records
+     ========================================================= */
+
+  function parseQuaSource(source, sidecarIndex) {
+    if (typeof jsyaml === "undefined") {
+      throw new Error("js-yaml failed to load — check your internet connection.");
+    }
+
+    var data = jsyaml.load(source.text);
+    if (!data || typeof data !== "object") {
+      throw new Error("File does not look like a Quaver map (empty or invalid YAML).");
+    }
+
+    var keyCount = deriveKeyCount(data);
+    var notes = extractNotes(data, keyCount);
+    var laneOffset = detectLaneOffset(notes, keyCount);
+
+    var holdCount = 0;
+    for (var i = 0; i < notes.length; i++) if (notes[i].end !== null) holdCount++;
+
+    // ---- BPM detection ----
+    var parsedTps = parseTimingPoints(data);
+    var bpmInfo = deriveBpm(data, notes, parsedTps);
+    var bpm = bpmInfo.bpm;
+
+    var svs = buildSvPoints(data);
+
+    var length = Number(data.Length);
+    if (!isFinite(length) || length <= 0) {
+      length = notes.length ? notes[notes.length - 1].start : 0;
+    }
+
+    var audioFile = findSidecar(sidecarIndex, data.AudioFile) || guessAudio(sidecarIndex);
+    var bgFile    = findSidecar(sidecarIndex, data.BackgroundFile) || guessBackground(sidecarIndex);
+
+    var meta = {
+      title: data.Title || "Untitled",
+      artist: data.Artist || "Unknown Artist",
+      creator: data.Creator || "Unknown",
+      difficultyName: data.DifficultyName || "Normal",
+      keyCount: keyCount,
+      noteCount: notes.length,
+      holdCount: holdCount,
+      svCount: svs.length,
+      bpm: bpm,
+      bpmInfo: bpmInfo,
+      bpmDetected: bpmInfo.detected,
+      bpmSource: bpmInfo.source,
+      bpmChanges: bpmInfo.changes,
+      length: length,
+      source: data.Source || "",
+      tags: normalizeTags(data.Tags),
+      hasAudio: !!audioFile,
+      hasBg: !!bgFile,
+      laneOffset: laneOffset
+    };
+
+    return {
+      id: "m" + (++uid),
+      fileName: source.name,
+      filePath: source.path,
+      data: data,
+      meta: meta,
+      notes: notes,
+      laneOffset: laneOffset,
+      parsedTps: parsedTps,
+      bpmInfo: bpmInfo,
+      audioFile: audioFile,
+      bgFile: bgFile,
+      osuText: null,
+      oszBlob: null,
+      oszRate: null,
+      oszPitch: null,
+      converted: false,
+      error: null
+    };
+  }
+
+  /* =========================================================
+     Conversion + packaging
+     ========================================================= */
+
+  function ensureOsuText(map) {
+    if (!map.osuText) map.osuText = buildOsuText(map);
+    return map.osuText;
+  }
+
+  async function buildOsz(map) {
+    var rate = speedRate;
+    var pitched = pitchShift;
+
+    if (map.oszBlob && map.oszRate === rate && map.oszPitch === pitched) {
+      return map.oszBlob;
+    }
+
+    if (typeof JSZip === "undefined") throw new Error("JSZip failed to load.");
+
+    // Prepare the (possibly sped-up) audio first so the .osu can reference
+    // the exact filename that ends up inside the archive.
+    var audio = await prepareAudio(map, rate, pitched);
+
+    map.osuText = buildOsuText(map, audio ? audio.name : null);
+
+    setBusyText("Packaging .osz…");
+    var zip = new JSZip();
+    var base = sanitizeFilename(
+      map.meta.artist + " - " + displayTitle(map) +
+      " (" + map.meta.creator + ") [" + displayVersion(map) + "]"
+    );
+
+    zip.file(base + ".osu", map.osuText);
+    if (audio) zip.file(audio.name, audio.blob);
+    if (map.bgFile) zip.file(map.bgFile.name, map.bgFile);
+
+    map.oszBlob = await zip.generateAsync({
+      type: "blob",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 }
+    });
+    map.oszRate = rate;
+    map.oszPitch = pitched;
+    return map.oszBlob;
+  }
+
+  function osuFilename(map) {
+    return sanitizeFilename(
+      map.meta.artist + " - " + displayTitle(map) +
+      " (" + map.meta.creator + ") [" + displayVersion(map) + "]"
+    ) + ".osu";
+  }
+
+  function oszFilename(map) {
+    return sanitizeFilename(
+      map.meta.artist + " - " + displayTitle(map) +
+      " (" + map.meta.creator + ")"
+    ) + ".osz";
+  }
+
+  /* =========================================================
+     Rendering
+     ========================================================= */
+
+  function keyBadgeClass(keys) {
+    if (keys <= 3) return "k-low";
+    if (keys === 4) return "k4";
+    if (keys === 5 || keys === 6) return "k5-6";
+    if (keys === 7) return "k7";
+    if (keys === 8 || keys === 9) return "k8-9";
+    return "k-high";
+  }
+
+  function renderCard(map) {
+    var m = map.meta;
+    var rate = speedRate;
+    var sped = rate !== 1;
+
+    var shownBpm = m.bpm > 0 ? m.bpm * rate : 0;
+    var shownLength = m.length / rate;
+
+    var chips = [
+      '<span class="chip diff">' + esc(m.difficultyName) + "</span>"
+    ];
+    if (sped) {
+      var arrow = rate > 1 ? "⏩" : "⏪";
+      chips.push('<span class="chip speed">' + arrow + " " + fmtRate(rate) + "×</span>");
+      chips.push('<span class="chip pitch">' + (pitchShift ? "♪ pitch scales" : "♪ pitch kept") + "</span>");
+    }
+    chips.push('<span class="chip">' + m.noteCount + " notes</span>");
+    if (m.holdCount > 0) chips.push('<span class="chip">' + m.holdCount + " LNs</span>");
+
+    if (shownBpm > 0) {
+      var bpmChipClass = "chip";
+      var bpmChipText = fmtBpm(shownBpm) + " BPM";
+      if (m.bpmDetected) {
+        bpmChipClass += " bpm-auto";
+        bpmChipText += " (auto)";
+      } else if (m.bpmChanges > 0) {
+        bpmChipClass += " bpm-multi";
+        bpmChipText += " · " + (m.bpmChanges + 1) + " points";
+      }
+      chips.push('<span class="' + bpmChipClass + '">' + bpmChipText + "</span>");
+    }
+
+    if (m.svCount > 0) chips.push('<span class="chip">' + m.svCount + " SV</span>");
+    chips.push('<span class="chip">' + formatLength(shownLength) + "</span>");
+
+    if (m.laneOffset > 0) {
+      chips.push('<span class="chip fix">↔ 1-indexed lanes → shifted</span>');
+    }
+
+    chips.push(m.hasAudio
+      ? '<span class="chip has">♪ ' + esc(map.audioFile.name) + "</span>"
+      : '<span class="chip miss">no audio found</span>');
+
+    chips.push(m.hasBg
+      ? '<span class="chip has">▣ ' + esc(map.bgFile.name) + "</span>"
+      : '<span class="chip miss">no bg found</span>');
+
+    var byline = "charted by " + esc(m.creator);
+    if (m.source) byline += " · from " + esc(m.source);
+
+    var errHtml = map.error
+      ? '<div class="card-note err">⚠ ' + esc(map.error) + "</div>"
+      : "";
+
+    // BPM detection note
+    var bpmNoteHtml = "";
+    if (m.bpmSource === "notes") {
+      bpmNoteHtml = '<div class="card-note bpm">🎵 BPM auto-detected from note spacing: <strong>' +
+        fmtBpm(m.bpm) + " BPM</strong>. The original file had no usable timing points or top-level BPM, " +
+        "so this is a best-effort estimate.</div>";
+    } else if (m.bpmSource === "default") {
+      bpmNoteHtml = '<div class="card-note bpm">🎵 Could not detect BPM from the file or its notes — ' +
+        "falling back to <strong>120 BPM</strong>. You may want to fix the timing after import.</div>";
+    } else if (m.bpmSource === "timing" && m.bpmChanges > 0) {
+      bpmNoteHtml = '<div class="card-note bpm">🎵 ' + (m.bpmChanges + 1) +
+        " BPM points detected (base <strong>" + fmtBpm(m.bpm) + " BPM</strong>) — all preserved in the .osu.</div>";
+    }
+
+    var speedHtml = sped
+      ? '<div class="card-note speed">' +
+        (rate > 1 ? "⏩ Speeding up" : "⏪ Slowing down") +
+        " to <strong>" + fmtRate(rate) + "×</strong> · " +
+        (pitchShift ? "pitch scales with the rate" : "pitch stays constant") +
+        " — title <code>" + esc(displayTitle(map)) +
+        "</code> · difficulty <code>" + esc(displayVersion(map)) + "</code>" +
+        (m.hasAudio
+          ? " · audio will be re-encoded to " + (MP3_OK ? "MP3" : "WAV") + "."
+          : " · no audio file, so only note timings are scaled.") +
+        "</div>"
+      : "";
+
+    var noteHtml = map.converted
+      ? '<div class="card-note ok">✓ Packaged as .osz — includes ' +
+        (map.audioFile
+          ? (sped
+              ? "re-encoded audio (" + fmtRate(rate) + "×, " +
+                (pitchShift ? "pitched" : "constant pitch") + ")"
+              : "audio")
+          : "<em>no audio</em>") + ", " +
+        (map.bgFile ? "background" : "<em>no background</em>") +
+        ", BPM changes, SV changes, and metadata." +
+        (m.laneOffset > 0 ? " Lane numbering was 1-indexed; shifted down by 1." : "") +
+        "</div>"
+      : '<div class="card-note">Source: <code>' + esc(map.filePath || map.fileName) + "</code>" +
+        (m.laneOffset > 0 ? ' · <span style="color:#9fc4ff">1-indexed lanes will be shifted down by 1</span>' : "") +
+        "</div>";
+
+    var cardClasses = "card";
+    if (map.converted) cardClasses += " converted";
+    if (map.error)     cardClasses += " errored";
+
+    return (
+      '<article class="' + cardClasses + '" data-id="' + map.id + '">' +
+        '<div class="card-head">' +
+          '<div class="keys-badge ' + keyBadgeClass(m.keyCount) +
+            (m.keyCount >= 10 ? " wide" : "") + '">' + m.keyCount + "K</div>" +
+          '<div class="info">' +
+            "<h3>" + esc(m.title) + "</h3>" +
+            '<p class="artist">' + esc(m.artist) + "</p>" +
+            '<p class="byline">' + byline + "</p>" +
+            '<div class="chips">' + chips.join("") + "</div>" +
+          "</div>" +
+        "</div>" +
+        '<div class="card-actions">' +
+          '<button class="btn primary" data-action="convert" data-id="' + map.id + '"' +
+            (map.converted ? " disabled" : "") + ">" +
+            (map.converted ? "Converted ✓" : "Convert Into Osu!Mania Map?") +
+          "</button>" +
+          '<button class="btn good' + (map.converted ? "" : " hidden") +
+            '" data-action="download-osz" data-id="' + map.id + '">⬇ Download .osz</button>' +
+          '<button class="btn ghost' + (map.converted ? "" : " hidden") +
+            '" data-action="download-osu" data-id="' + map.id + '">.osu only</button>' +
+          '<button class="btn ghost" data-action="remove" data-id="' + map.id + '">✕</button>' +
+          errHtml +
+          bpmNoteHtml +
+          speedHtml +
+          noteHtml +
+        "</div>" +
+      "</article>"
+    );
+  }
+
+  function render() {
+    if (!maps.length) {
+      mapsEl.innerHTML = "";
+      toolbarEl.classList.add("hidden");
+      updatePreviewAvailability();
+      return;
+    }
+
+    toolbarEl.classList.remove("hidden");
+    mapCountEl.textContent = maps.length + (maps.length === 1 ? " map" : " maps");
+
+    var html = "";
+    for (var i = 0; i < maps.length; i++) html += renderCard(maps[i]);
+    mapsEl.innerHTML = html;
+
+    var remaining = maps.filter(function (m) { return !m.converted && !m.error; }).length;
+    convertAllEl.disabled = remaining === 0;
+    convertAllEl.textContent = remaining === 0
+      ? "All converted ✓"
+      : "Convert all → .osz (" + remaining + ")";
+
+    updatePreviewAvailability();
+  }
+
+  /* =========================================================
+     Ingest queue — prevents concurrent upload races
+     ========================================================= */
+
+  var ingestQueue = [];
+  var ingestRunning = false;
+
+  async function addFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) return;
+    ingestQueue.push(files);
+    if (!ingestRunning) await drainIngestQueue();
+  }
+
+  async function drainIngestQueue() {
+    ingestRunning = true;
+    try {
+      while (ingestQueue.length) {
+        var files = ingestQueue.shift();
+        try {
+          await processFiles(files);
+        } catch (err) {
+          console.error("Ingest error:", err);
+          setStatus("Error processing files: " + (err && err.message ? err.message : err), "err");
+        }
+      }
+    } finally {
+      ingestRunning = false;
+    }
+  }
+
+  async function processFiles(files) {
+    // Make sure every File has a relative path hint for sidecar lookup.
+    files.forEach(function (f) {
+      if (!f.__relPath) tagRelativePath(f, f.webkitRelativePath || f.name);
+    });
+
+    setStatus("Reading " + files.length + " file" + (files.length === 1 ? "" : "s") + "…");
+
+    var result = await readQuaSources(files);
+
+    // Build the sidecar index from BOTH the dropped files and any files
+    // we extracted out of .qp archives.
+    var allSidecars = files.concat(result.extracted || []);
+    var sidecarIndex = buildSidecarIndex(allSidecars);
+
+    if (!result.sources.length) {
+      setStatus(
+        "No Quaver maps found. Drop .qua files, a .qp pack, or a folder containing them." +
+        (result.errors.length ? " (" + result.errors.join("; ") + ")" : ""),
+        "err"
+      );
+      return;
+    }
+
+    var added = 0;
+    var failed = [];
+    var autoDetected = 0;
+
+    for (var i = 0; i < result.sources.length; i++) {
+      var src = result.sources[i];
+      try {
+        var map = parseQuaSource(src, sidecarIndex);
+        if (map.meta.noteCount === 0) {
+          failed.push(src.name + ": no hit objects");
+          continue;
+        }
+
+        var dup = maps.some(function (m) {
+          return m.filePath === map.filePath &&
+                 m.meta.difficultyName === map.meta.difficultyName &&
+                 m.meta.keyCount === map.meta.keyCount;
+        });
+        if (dup) continue;
+
+        if (map.meta.bpmSource === "notes") autoDetected++;
+        maps.push(map);
+        added++;
+      } catch (err) {
+        failed.push(src.name + ": " + (err && err.message ? err.message : err));
+      }
+    }
+
+    render();
+
+    var msg = "Loaded " + added + " map" + (added === 1 ? "" : "s") + ".";
+    if (autoDetected > 0) {
+      msg += " " + autoDetected + " BPM value" + (autoDetected === 1 ? " was" : "s were") +
+             " auto-detected from note spacing.";
+    }
+    if (result.errors.length) msg += " Pack errors: " + result.errors.join("; ");
+    if (failed.length) msg += " Skipped: " + failed.join("; ");
+    setStatus(msg, added ? "ok" : "err");
+  }
+
+  /* =========================================================
+     Convert handlers
+     ========================================================= */
+
+  async function convertAndDownloadOsz(map) {
+    setBusy(true, "Building .osz…");
+    try {
+      var blob = await buildOsz(map);
+      downloadBlob(blob, oszFilename(map));
+      map.converted = true;
+      map.error = null;
+      render();
+      setStatus(
+        "Packaged “" + map.meta.title + "” — " + map.meta.keyCount +
+        "K osu!mania .osz downloaded" +
+        (speedRate !== 1
+          ? " at " + fmtRate(speedRate) + "× (" +
+            (pitchShift ? "pitched" : "constant pitch") + ")"
+          : "") + "." +
+        (map.laneOffset > 0 ? " (1-indexed lanes shifted down by 1)" : ""),
+        "ok"
+      );
+    } catch (err) {
+      map.error = err && err.message ? err.message : String(err);
+      render();
+      setStatus("Conversion failed: " + map.error, "err");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function convertAllAndDownload() {
+    var pending = maps.filter(function (m) { return !m.converted && !m.error; });
+    if (!pending.length) return;
+
+    setBusy(true, "Converting " + pending.length + " map" + (pending.length === 1 ? "" : "s") + "…");
+    var ok = 0, fail = 0;
+
+    for (var i = 0; i < pending.length; i++) {
+      var map = pending[i];
+      try {
+        setBusyText(
+          "Building .osz " + (i + 1) + "/" + pending.length +
+          (speedRate !== 1 ? " (" + fmtRate(speedRate) + "× speed)" : "") + "…"
+        );
+        var blob = await buildOsz(map);
+        downloadBlob(blob, oszFilename(map));
+        map.converted = true;
+        map.error = null;
+        ok++;
+        // Small delay so the browser doesn't drop concurrent downloads.
+        await new Promise(function (r) { setTimeout(r, 300); });
+      } catch (err) {
+        map.error = err && err.message ? err.message : String(err);
+        fail++;
+      }
+    }
+
+    render();
+    setBusy(false);
+
+    var msg = "Converted " + ok + " map" + (ok === 1 ? "" : "s") + " to .osz.";
+    if (fail) msg += " " + fail + " failed.";
+    setStatus(msg, ok ? "ok" : "err");
+  }
+
+  /* =========================================================
+     Event wiring
+     ========================================================= */
+
+  function safeHandler(fn) {
+    return function (e) {
+      try {
+        var r = fn(e);
+        if (r && typeof r.catch === "function") {
+          r.catch(function (err) {
+            console.error("Handler error:", err);
+            setStatus("Unexpected error: " + (err && err.message ? err.message : err), "err");
+            setBusy(false);
+          });
+        }
+      } catch (err) {
+        console.error("Handler error:", err);
+        setStatus("Unexpected error: " + (err && err.message ? err.message : err), "err");
+        setBusy(false);
+      }
+    };
+  }
+
+  dropzoneEl.addEventListener("click", function (e) {
+    if (e.target.closest("button")) return;
+    fileInputEl.click();
+  });
+
+  pickFilesEl.addEventListener("click", function (e) {
+    e.stopPropagation();
+    fileInputEl.click();
+  });
+
+  pickFolderEl.addEventListener("click", function (e) {
+    e.stopPropagation();
+    folderInputEl.click();
+  });
+
+  fileInputEl.addEventListener("change", safeHandler(function () {
+    var files = Array.prototype.slice.call(fileInputEl.files || []);
+    fileInputEl.value = "";
+    addFiles(files);
+  }));
+
+  folderInputEl.addEventListener("change", safeHandler(function () {
+    var files = Array.prototype.slice.call(folderInputEl.files || []);
+    folderInputEl.value = "";
+    addFiles(files);
+  }));
+
+  ["dragenter", "dragover"].forEach(function (evt) {
+    dropzoneEl.addEventListener(evt, function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzoneEl.classList.add("over");
+    });
+  });
+
+  ["dragleave", "dragend"].forEach(function (evt) {
+    dropzoneEl.addEventListener(evt, function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzoneEl.classList.remove("over");
+    });
+  });
+
+  dropzoneEl.addEventListener("drop", safeHandler(function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dropzoneEl.classList.remove("over");
+    // Snapshot the DataTransfer entries synchronously before any await.
+    var dt = e.dataTransfer;
+    return filesFromDataTransfer(dt).then(function (files) {
+      addFiles(files);
+    });
+  }));
+
+  window.addEventListener("dragover", function (e) { e.preventDefault(); });
+  window.addEventListener("drop", function (e) { e.preventDefault(); });
+
+  mapsEl.addEventListener("click", safeHandler(function (e) {
+    var btn = e.target.closest("button[data-action]");
+    if (!btn) return;
+
+    var id = btn.dataset.id;
+    var action = btn.dataset.action;
+    var map = null;
+    for (var i = 0; i < maps.length; i++) {
+      if (maps[i].id === id) { map = maps[i]; break; }
+    }
+    if (!map) return;
+
+    if (action === "convert") {
+      return convertAndDownloadOsz(map);
+    }
+
+    if (action === "download-osz") {
+      setBusy(true, "Rebuilding .osz…");
+      return buildOsz(map).then(function (blob) {
+        downloadBlob(blob, oszFilename(map));
+      }).catch(function (err) {
+        setStatus("Could not build .osz: " + (err && err.message ? err.message : err), "err");
+      }).finally(function () {
+        setBusy(false);
+      });
+    }
+
+    if (action === "download-osu") {
+      ensureOsuText(map);
+      downloadBlob(new Blob([map.osuText], { type: "text/plain;charset=utf-8" }), osuFilename(map));
+      return;
+    }
+
+    if (action === "remove") {
+      maps = maps.filter(function (m) { return m.id !== id; });
+      render();
+      return;
+    }
+  }));
+
+  convertAllEl.addEventListener("click", safeHandler(convertAllAndDownload));
+
+  clearAllEl.addEventListener("click", function () {
+    maps = [];
+    disposePreview();
+    render();
+    setStatus("");
+  });
+
+  // Safety net: if anything unexpected throws, hide the busy overlay.
+  window.addEventListener("error", function () {
+    if (busyCount > 0) {
+      busyCount = 0;
+      document.getElementById("busy").classList.add("hidden");
+    }
+  });
+
+  window.addEventListener("unhandledrejection", function () {
+    if (busyCount > 0) {
+      busyCount = 0;
+      document.getElementById("busy").classList.add("hidden");
+    }
+  });
+
+  /* ---------- Dependency check ---------- */
+
+  window.addEventListener("load", function () {
+    var missing = [];
+    if (typeof jsyaml === "undefined") missing.push("js-yaml");
+    if (typeof JSZip === "undefined") missing.push("JSZip");
+    if (missing.length) {
+      setStatus(
+        "Warning: could not load " + missing.join(" and ") +
+        " from the CDN. YAML parsing and .osz support may be unavailable.",
+        "err"
+      );
+    }
+  });
+
+  /* ---------- Initial sync ---------- */
+
+  updatePitchHint();
+  applySpeed(1, false);
+  updatePreviewAvailability();
+
+})();
+</script>
+</body>
+</html>
