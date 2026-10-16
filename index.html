@@ -139,6 +139,7 @@
   }
   .status.err { color: var(--bad); }
   .status.ok  { color: var(--good); }
+  .status.warn { color: var(--warn); }
 
   /* ---------- Speed panel ---------- */
 
@@ -339,16 +340,17 @@
     background: linear-gradient(135deg, #4b5bff, #8a5bff);
     box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
   }
-  .keys-badge.wide {
-    font-size: 14px;
-    letter-spacing: -0.05em;
-  }
-  .keys-badge.k-low  { background: linear-gradient(135deg,#3aa0ff,#2ee6c8); }
+  .keys-badge.k1     { background: linear-gradient(135deg,#3aa0ff,#2ee6c8); }
+  .keys-badge.k2     { background: linear-gradient(135deg,#3aa0ff,#5cd6ff); }
+  .keys-badge.k3     { background: linear-gradient(135deg,#3aa0ff,#8ce0ff); }
   .keys-badge.k4     { background: linear-gradient(135deg,#4b5bff,#8a5bff); }
-  .keys-badge.k5-6   { background: linear-gradient(135deg,#ff8a3d,#ff5b8a); }
+  .keys-badge.k5     { background: linear-gradient(135deg,#ff8a3d,#ff5b8a); }
+  .keys-badge.k6     { background: linear-gradient(135deg,#ff5b8a,#ff8a3d); }
   .keys-badge.k7     { background: linear-gradient(135deg,#00c2a8,#38d16b); }
-  .keys-badge.k8-9   { background: linear-gradient(135deg,#ff5b8a,#a06cff); }
-  .keys-badge.k-high { background: linear-gradient(135deg,#f2c14e,#ff8a3d); }
+  .keys-badge.k8     { background: linear-gradient(135deg,#ff5b8a,#a06cff); }
+  .keys-badge.k9     { background: linear-gradient(135deg,#a06cff,#ff5b8a); }
+  .keys-badge.k10    { background: linear-gradient(135deg,#f2c14e,#ff8a3d); }
+  .keys-badge.k10::after { content: ""; }
 
   .info { flex: 1 1 auto; min-width: 0; }
   .info h3 {
@@ -407,6 +409,16 @@
     border-color: rgba(255,168,224,.5);
     background: rgba(255,168,224,.10);
   }
+  .chip.kps {
+    color: #9ee6a0;
+    border-color: rgba(158,230,160,.45);
+    background: rgba(158,230,160,.08);
+  }
+  .chip.kps-peak {
+    color: #ffd166;
+    border-color: rgba(255,209,102,.5);
+    background: rgba(255,209,102,.10);
+  }
 
   .card-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
   .card-note {
@@ -442,6 +454,7 @@
     position: fixed;
     inset: 0;
     background: rgba(6, 7, 12, .72);
+    -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
@@ -473,9 +486,9 @@
     <h1>Quaver <span class="arrow">→</span> osu!mania</h1>
     <p class="sub">
       Drop a <code>.qua</code> file, a <code>.qp</code> pack, or a whole map folder.
-      Key count (1K–18K, including 10K), audio, background, SV changes, BPM, artist,
-      title, charter, and difficulty name are all preserved. Output is a ready-to-play <code>.osz</code>.
-      Optionally change the speed (0.5×–2×) with or without pitch scaling — audio, BPM, notes and SV all scale together.
+      Supports <strong>1K–10K</strong> (including full 10K). Preserves audio, background,
+      SV changes, BPM, artist, title, charter, and difficulty name. Output is a ready-to-play <code>.osz</code>.
+      Optionally change the speed (0.5×–2×) with or without pitch scaling.
     </p>
   </header>
 
@@ -538,18 +551,19 @@
   <footer>
     Conversion happens entirely in your browser — nothing is uploaded anywhere.
     <br>
-    <strong>Tip:</strong> drop the <em>whole map folder</em> so audio + background get bundled
-    into the <code>.osz</code> automatically. SV changes, BPM changes, and long notes all carry over.
-    <br>
-    <strong>Speed:</strong> anything other than 1× re-encodes the audio (MP3 when available, otherwise WAV),
-    scales BPM and every timestamp. The title gets <code>(1.5x Speed)</code> and the difficulty gets
-    <code>(Sped Up / 1.5x)</code> or <code>(Slowed Down / 0.75x)</code> appended.
-    <br>
-    <strong>Pitch:</strong> with the switch on, pitch scales with the rate (nightcore/slowed style).
-    With it off, the tempo changes but the pitch stays constant (time-stretch).
+    <strong>Key range:</strong> 1K through 10K (including full 10-key support). Maps above 10K are rejected.
     <br>
     <strong>BPM:</strong> read from Quaver timing points first, then the top-level <code>BPM</code> field,
-    then auto-detected from note spacing if both are missing. No more blind 120 BPM defaults.
+    then auto-detected from note spacing using dominant-interval analysis + grid alignment scoring.
+    <br>
+    <strong>KPS:</strong> average and peak keys-per-second (notes-per-second) are shown on each card.
+    <br>
+    <strong>Speed:</strong> anything other than 1× re-encodes the audio (MP3 when available, otherwise WAV),
+    scales BPM and every timestamp. Title gets <code>(1.5x Speed)</code>, difficulty gets
+    <code>(Sped Up / 1.5x)</code> or <code>(Slowed Down / 0.75x)</code>.
+    <br>
+    <strong>Pitch:</strong> with the switch on, pitch scales with the rate (nightcore/slowed style).
+    With it off, tempo changes but pitch stays constant (WSOLA time-stretch).
     <br>
     <strong>Preview:</strong> uses the first loaded map's audio. If there's no audio, the button is disabled.
     <br>
@@ -572,21 +586,22 @@
      Constants & helpers
      ========================================================= */
 
-  const MANIA_Y = 192;
-  const PLAYFIELD_W = 512;
-  const MAX_KEYS = 18;
+  var MANIA_Y = 192;
+  var PLAYFIELD_W = 512;
+  var MIN_KEYS = 1;
+  var MAX_KEYS = 10;
 
-  const MIN_RATE = 0.5;
-  const MAX_RATE = 2;
-  const RATE_STEP = 0.05;
+  var MIN_RATE = 0.5;
+  var MAX_RATE = 2;
+  var RATE_STEP = 0.05;
 
-  const HITSOUND_NAMES = {
+  var HITSOUND_NAMES = {
     normal: 0, clap: 8, whistle: 2, finish: 4,
     hitnormal: 0, hitclap: 8, hitwhistle: 2, hitfinish: 4
   };
 
-  const AUDIO_EXTS = ["mp3", "ogg", "wav", "m4a", "flac"];
-  const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
+  var AUDIO_EXTS = ["mp3", "ogg", "wav", "m4a", "flac"];
+  var IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -603,7 +618,7 @@
 
   function fmtTime(n) { return String(Math.round(Number(n) || 0)); }
 
-  /** Format a speed multiplier for display: 1.5 -> "1.5", 2 -> "2", 0.75 -> "0.75". */
+  /** Format a speed multiplier: 1.5 -> "1.5", 2 -> "2", 0.75 -> "0.75". */
   function fmtRate(r) {
     var v = Math.round(Number(r) * 100) / 100;
     if (!isFinite(v)) v = 1;
@@ -670,8 +685,8 @@
      Speed / pitch state
      ========================================================= */
 
-  var speedRate = 1;      // global multiplier applied on export
-  var pitchShift = true;  // true = pitch scales with rate, false = pitch preserved
+  var speedRate = 1;
+  var pitchShift = true;
 
   var MP3_OK = (typeof lamejs !== "undefined" && lamejs &&
                 typeof lamejs.Mp3Encoder === "function");
@@ -695,7 +710,6 @@
     return speedRate === 1 ? v : v + speedVersionSuffix(speedRate);
   }
 
-  /** Name that the (possibly re-encoded) audio file will have inside the .osz */
   function exportAudioName(map) {
     if (!map.audioFile) return null;
     if (speedRate === 1) return map.audioFile.name;
@@ -730,37 +744,28 @@
      ========================================================= */
 
   /**
-   * Determine the key count.
+   * Return the raw (unclamped) key count for a .qua file.
+   * Returns 0 if nothing could be determined.
    *
-   * Priority:
+   * Order of preference:
    *   1. Explicit KeyCount field
-   *   2. Mode string ("Keys10", "10K", "10")
-   *   3. Lane analysis — handles both 0-indexed (0..N-1) and
-   *      1-indexed (1..N) lane numbering.
+   *   2. Mode string "KeysN" / "NK"
+   *   3. Lane analysis (0-indexed or 1-indexed)
    */
   function deriveKeyCount(data) {
-    // Explicit KeyCount wins.
     if (isFinite(data.KeyCount) && data.KeyCount > 0) {
-      return clampKeys(Math.round(data.KeyCount));
+      return Math.round(data.KeyCount);
     }
 
-    // Mode string like "Keys4", "Keys7", "Keys10", "10K", "10"
     if (typeof data.Mode === "string") {
       var m = data.Mode.match(/(\d+)/);
       if (m) {
         var n = parseInt(m[1], 10);
-        if (n >= 1 && n <= MAX_KEYS) return n;
+        if (n >= 1) return n;
       }
     }
-    // Mode as a raw number (some tools write this).
-    // Avoid interpreting 1/2 (Quaver enum for Keys4/Keys7) as key counts;
-    // only trust numbers ≥ 3 that are plausible key counts.
-    if (typeof data.Mode === "number" && isFinite(data.Mode)) {
-      var mn = Math.round(data.Mode);
-      if (mn >= 3 && mn <= MAX_KEYS) return mn;
-    }
 
-    // Fall back to lane analysis.
+    // Lane analysis.
     var objs = Array.isArray(data.HitObjects) ? data.HitObjects : [];
     var minLane = Infinity, maxLane = -1;
     for (var i = 0; i < objs.length; i++) {
@@ -772,17 +777,17 @@
     }
     if (maxLane >= 0) {
       // 1-indexed lanes: {1..N} → N keys
-      if (minLane >= 1) return clampKeys(maxLane);
+      if (minLane >= 1) return maxLane;
       // 0-indexed lanes: {0..N-1} → N keys
-      return clampKeys(maxLane + 1);
+      return maxLane + 1;
     }
 
-    return 4;
+    return 0;
   }
 
   function clampKeys(n) {
     if (!isFinite(n) || n < 1) return 4;
-    return Math.min(MAX_KEYS, Math.max(1, Math.round(n)));
+    return Math.min(MAX_KEYS, Math.max(MIN_KEYS, Math.round(n)));
   }
 
   function normalizeTags(tags) {
@@ -806,7 +811,7 @@
       var lane = Number(o.Lane);
       var start = Number(o.StartTime);
       if (!isFinite(lane) || !isFinite(start)) continue;
-      // Allow lanes up to keyCount (inclusive) so 1-indexed data survives.
+      // Allow lanes up to keyCount so 1-indexed data survives.
       if (lane < 0 || lane > keyCount + 1) continue;
 
       var end = Number(o.EndTime);
@@ -824,9 +829,7 @@
     return notes;
   }
 
-  /**
-   * Detect 1-indexed lane numbering and return the amount to shift lanes down.
-   */
+  /** Detect 1-indexed lanes → returns 1 to shift down, 0 otherwise. */
   function detectLaneOffset(notes, keyCount) {
     if (!notes.length || keyCount < 2) return 0;
 
@@ -836,8 +839,8 @@
       if (notes[i].lane > maxLane) maxLane = notes[i].lane;
     }
 
-    if (maxLane >= keyCount) return 1;   // definitely 1-indexed
-    if (minLane === 1) return 1;         // almost certainly 1-indexed
+    if (maxLane >= keyCount) return 1;
+    if (minLane === 1) return 1;
     return 0;
   }
 
@@ -845,11 +848,7 @@
      BPM detection
      ========================================================= */
 
-  /**
-   * Parse the raw TimingPoints array into a clean list of BPM points.
-   * Returns [] when the file has no usable (uninherited) timing points.
-   * Inherited / SV points have BPM 0 or missing and are filtered out.
-   */
+  /** Parse raw TimingPoints into clean uninherited BPM points. */
   function parseTimingPoints(data) {
     var src = Array.isArray(data.TimingPoints) ? data.TimingPoints : [];
     var tps = [];
@@ -872,11 +871,7 @@
     return tps;
   }
 
-  /**
-   * Pick the "main" BPM out of a set of timing points.
-   * Uses the most frequently occurring BPM, breaking ties toward the
-   * earliest occurrence (which is usually the song's base BPM).
-   */
+  /** Pick the most-used BPM (ties broken by earliest occurrence). */
   function mainBpmFromTimingPoints(tps) {
     if (!tps || !tps.length) return 0;
 
@@ -909,21 +904,36 @@
     return bestBpm;
   }
 
+  function countBpmChanges(tps) {
+    if (!tps || !tps.length) return 0;
+    var seen = {};
+    var unique = 0;
+    for (var i = 0; i < tps.length; i++) {
+      var key = Math.round(tps[i].bpm * 100) / 100;
+      if (!seen[key]) { seen[key] = 1; unique++; }
+    }
+    return Math.max(0, unique - 1);
+  }
+
   /**
    * Auto-detect BPM from note onset spacing.
    *
-   * 1. Collect the unique note start times (chords collapse to one).
-   * 2. Build an interval histogram (5 ms bins), ignoring gaps > 1.5 s
-   *    and < 20 ms (chord flams / duplicates).
-   * 3. Score every candidate BPM from 60–300 in 0.5 steps by counting
-   *    how many interval bins land on that BPM's grid at any of the
-   *    usual subdivisions (1/1 … 1/16).
-   * 4. Return the best-scoring BPM, or 0 if the fit is too weak.
+   * Algorithm:
+   *   1. Collapse chords into unique start times.
+   *   2. Build a histogram of adjacent intervals (5 ms bins),
+   *      ignoring gaps < 40 ms or > 2 s.
+   *   3. The dominant interval is almost always the main note
+   *      spacing (1/4, 1/2, or 1 beat). For each candidate
+   *      fractional beat value, derive a candidate BPM.
+   *   4. Score every candidate by how well the notes snap to
+   *      that BPM's grid (max over common subdivisions).
+   *   5. Slight preference for the natural 100–220 BPM range,
+   *      which disambiguates double/half tempo.
    *
-   * Returns 0 when detection is unreliable (too few notes, no clear grid).
+   * Returns 0 when detection is unreliable.
    */
   function detectBpmFromNotes(notes) {
-    if (!notes || notes.length < 8) return 0;
+    if (!notes || notes.length < 20) return 0;
 
     // 1. Unique sorted start times
     var times = [];
@@ -932,54 +942,69 @@
       var t = notes[i].start;
       if (!seen[t]) { seen[t] = 1; times.push(t); }
     }
+    if (times.length < 15) return 0;
     times.sort(function (a, b) { return a - b; });
 
-    if (times.length < 6) return 0;
-
-    // 2. Interval histogram (5 ms bins)
-    var hist = {};
-    var totalWeight = 0;
+    // 2. Adjacent interval histogram
+    var intervals = [];
     for (var i = 1; i < times.length; i++) {
       var d = times[i] - times[i - 1];
-      if (d < 20 || d > 1500) continue;
-      var bin = Math.round(d / 5) * 5;
-      hist[bin] = (hist[bin] || 0) + 1;
-      totalWeight++;
+      if (d >= 40 && d <= 2000) intervals.push(d);
+    }
+    if (intervals.length < 10) return 0;
+
+    var bins = {};
+    for (var i = 0; i < intervals.length; i++) {
+      var b = Math.round(intervals[i] / 5) * 5;
+      bins[b] = (bins[b] || 0) + 1;
     }
 
-    var bins = Object.keys(hist).map(Number);
-    if (bins.length < 3 || totalWeight < 4) return 0;
+    var peakBin = 0;
+    var peakCount = 0;
+    for (var b in bins) {
+      if (bins[b] > peakCount) {
+        peakCount = bins[b];
+        peakBin = parseInt(b, 10);
+      }
+    }
+    if (peakBin <= 0) return 0;
 
-    // 3. Score candidate BPMs
-    var subdivisions = [1, 2, 3, 4, 6, 8, 12, 16];
+    // 3. Generate candidate BPMs from the peak interval
+    var fractions = [
+      1/16, 1/12, 1/8, 1/6, 1/4, 1/3, 1/2, 2/3, 1, 3/2, 2
+    ];
+    var candidateSet = {};
+
+    function addCandidate(ms, fraction) {
+      if (ms <= 0) return;
+      var bpm = 60000 * fraction / ms;
+      if (bpm >= 60 && bpm <= 300) {
+        var key = Math.round(bpm * 10) / 10;
+        candidateSet[key] = bpm;
+      }
+    }
+
+    for (var i = 0; i < fractions.length; i++) {
+      addCandidate(peakBin, fractions[i]);
+      addCandidate(peakBin - 5, fractions[i]);
+      addCandidate(peakBin + 5, fractions[i]);
+    }
+
+    var candidates = [];
+    for (var k in candidateSet) candidates.push(candidateSet[k]);
+    if (!candidates.length) return 0;
+
+    // 4. Score each candidate
     var bestBpm = 0;
     var bestScore = -1;
 
-    for (var bpm = 60; bpm <= 300; bpm += 0.5) {
-      var beatMs = 60000 / bpm;
-      var score = 0;
+    for (var i = 0; i < candidates.length; i++) {
+      var bpm = candidates[i];
+      var score = scoreGridAlignment(times, bpm);
 
-      for (var j = 0; j < bins.length; j++) {
-        var bin = bins[j];
-        var matched = 0;
-
-        for (var s = 0; s < subdivisions.length; s++) {
-          var subMs = beatMs / subdivisions[s];
-          if (subMs < 15) continue; // too fine, skip
-
-          var ratio = bin / subMs;
-          var rounded = Math.round(ratio);
-          if (rounded < 1) continue;
-
-          var expected = rounded * subMs;
-          if (Math.abs(bin - expected) <= subMs * 0.12) {
-            matched = 1;
-            break;
-          }
-        }
-
-        if (matched) score += hist[bin];
-      }
+      // Soft preference for the natural BPM range.
+      if (bpm >= 100 && bpm <= 220) score += 0.06;
+      if (bpm >= 120 && bpm <= 200) score += 0.03;
 
       if (score > bestScore) {
         bestScore = score;
@@ -987,24 +1012,46 @@
       }
     }
 
-    // 4. Reject weak fits
-    if (bestScore < totalWeight * 0.45) return 0;
-    return bestBpm;
+    if (bestScore < 0.72) return 0;
+    return Math.round(bestBpm * 100) / 100;
+  }
+
+  /**
+   * Ratio of notes that snap to the given BPM's grid.
+   * Takes the best fit across common subdivisions
+   * (1/1, 1/2, 1/3, 1/4, 1/6, 1/8, 1/12, 1/16).
+   */
+  function scoreGridAlignment(times, bpm) {
+    var beatMs = 60000 / bpm;
+    var total = times.length;
+    var t0 = times[0];
+    var bestRatio = 0;
+
+    var subs = [1, 2, 3, 4, 6, 8, 12, 16];
+    for (var s = 0; s < subs.length; s++) {
+      var subMs = beatMs / subs[s];
+      if (subMs < 40) continue;
+
+      var tol = Math.min(subMs * 0.12, 20);
+      var count = 0;
+
+      for (var i = 0; i < total; i++) {
+        var rel = (times[i] - t0) % subMs;
+        if (rel < 0) rel += subMs;
+        if (rel > subMs / 2) rel = subMs - rel;
+        if (rel <= tol) count++;
+      }
+
+      var ratio = count / total;
+      if (ratio > bestRatio) bestRatio = ratio;
+    }
+
+    return bestRatio;
   }
 
   /**
    * Derive the map's primary BPM using the best available source.
-   *
-   * Order of preference:
-   *   1. Timing points (they define the real grid the map plays on)
-   *   2. Top-level BPM field (metadata, usually mirrors timing points)
-   *   3. Auto-detection from note spacing
-   *   4. 120 as an absolute last resort
-   *
-   * Returns { bpm, source, detected, changes } where:
-   *   - source: "timing" | "top-level" | "notes" | "default"
-   *   - detected: true if we had to guess (notes / default)
-   *   - changes: number of BPM changes in the timing points
+   * Returns { bpm, source, detected, changes }.
    */
   function deriveBpm(data, notes, parsedTps) {
     if (parsedTps && parsedTps.length) {
@@ -1014,7 +1061,7 @@
           bpm: main,
           source: "timing",
           detected: false,
-          changes: Math.max(0, parsedTps.length - 1)
+          changes: countBpmChanges(parsedTps)
         };
       }
     }
@@ -1024,18 +1071,15 @@
       return { bpm: topBpm, source: "top-level", detected: false, changes: 0 };
     }
 
-    var detectedBpm = detectBpmFromNotes(notes);
-    if (detectedBpm > 0) {
-      return { bpm: detectedBpm, source: "notes", detected: true, changes: 0 };
+    var detected = detectBpmFromNotes(notes);
+    if (detected > 0) {
+      return { bpm: detected, source: "notes", detected: true, changes: 0 };
     }
 
     return { bpm: 120, source: "default", detected: true, changes: 0 };
   }
 
-  /**
-   * Materialise a timing-point list ready for the .osu writer.
-   * Always guarantees at least one point at t=0.
-   */
+  /** Materialise a timing-point list ready for the .osu writer. */
   function buildOutputTimingPoints(parsedTps, fallbackBpm) {
     var tps = parsedTps && parsedTps.length
       ? parsedTps.slice()
@@ -1067,13 +1111,47 @@
   }
 
   /* =========================================================
+     KPS (keys / notes per second)
+     ========================================================= */
+
+  /**
+   * Returns { avg, peak } for the given notes, scaled by `rate`.
+   *  - avg  = total notes / active duration in seconds
+   *  - peak = max note count inside any 1-second sliding window
+   */
+  function computeKps(notes, rate) {
+    if (!notes || notes.length < 2) return { avg: 0, peak: 0 };
+
+    var n = notes.length;
+    var scaled = new Array(n);
+    for (var i = 0; i < n; i++) scaled[i] = notes[i].start / rate;
+
+    var durationMs = scaled[n - 1] - scaled[0];
+    if (durationMs <= 0) durationMs = 1;
+
+    var avg = n / (durationMs / 1000);
+
+    // Sliding 1-second window
+    var peak = 0;
+    var j = 0;
+    for (var i = 0; i < n; i++) {
+      if (j < i) j = i;
+      var windowEnd = scaled[i] + 1000;
+      while (j < n && scaled[j] < windowEnd) j++;
+      var count = j - i;
+      if (count > peak) peak = count;
+    }
+
+    return { avg: avg, peak: peak };
+  }
+
+  function fmtKpsAvg(v) {
+    if (!isFinite(v) || v <= 0) return "0.00";
+    return v.toFixed(2);
+  }
+
+  /* =========================================================
      Audio rendering
-     ---------------------------------------------------------
-     Two modes:
-       * pitched  → OfflineAudioContext with playbackRate, so pitch
-                    scales with the rate (fast + high, slow + low).
-       * unpitched → decode, then WSOLA time-stretch per channel,
-                    preserving pitch while changing tempo.
      ========================================================= */
 
   function floatTo16(input) {
@@ -1091,8 +1169,13 @@
     if (!AC) return Promise.reject(new Error("Web Audio API is unavailable in this browser."));
 
     var ctx;
-    try { ctx = sampleRate ? new AC({ sampleRate: sampleRate }) : new AC(); }
-    catch (e) { ctx = new AC(); }
+    try {
+      ctx = sampleRate ? new AC({ sampleRate: sampleRate }) : new AC();
+    } catch (e) {
+      try { ctx = new AC(); } catch (e2) {
+        return Promise.reject(new Error("Could not create an AudioContext."));
+      }
+    }
 
     return new Promise(function (resolve, reject) {
       var settled = false;
@@ -1107,15 +1190,18 @@
       try { res = ctx.decodeAudioData(arrayBuf, ok, no); }
       catch (e) { return no(e); }
       if (res && typeof res.then === "function") res.then(ok, no);
-    }).finally(function () {
+    }).then(function (buf) {
       try { if (ctx.close) ctx.close(); } catch (e) {}
+      return buf;
+    }, function (err) {
+      try { if (ctx.close) ctx.close(); } catch (e) {}
+      throw err;
     });
   }
 
   /**
-   * WSOLA time-stretch for one channel.
-   * `rate` > 1 → faster / shorter output. `rate` < 1 → slower / longer output.
-   * Pitch is preserved.
+   * WSOLA time-stretch for one channel. Pitch is preserved.
+   * rate > 1 → faster / shorter. rate < 1 → slower / longer.
    */
   function timeStretchChannel(input, rate) {
     if (Math.abs(rate - 1) < 0.001) {
@@ -1123,12 +1209,11 @@
     }
 
     var frameSize = 4096;
-    var hopOut = frameSize >> 1;                     // 2048
+    var hopOut = frameSize >> 1;
     var hopIn = Math.max(1, Math.round(hopOut * rate));
-    var overlap = frameSize - hopOut;                // 2048
+    var overlap = frameSize - hopOut;
     var searchRadius = Math.max(16, Math.min(128, Math.round(hopIn * 0.2)));
 
-    // Hann window
     var win = new Float32Array(frameSize);
     for (var i = 0; i < frameSize; i++) {
       win[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (frameSize - 1)));
@@ -1152,7 +1237,6 @@
       }
     }
 
-    // First frame
     addFrame(0, 0);
 
     var prevInPos = 0;
@@ -1163,7 +1247,6 @@
     while (inPos + frameSize <= input.length + searchRadius &&
            outPos < estLen && safety++ < 200000) {
 
-      // WSOLA alignment search against the previous frame's tail
       var templateStart = prevInPos + hopOut;
       var tLen = Math.min(overlap, input.length - templateStart);
 
@@ -1198,7 +1281,6 @@
       outPos += hopOut;
     }
 
-    // Normalise by the accumulated window sum
     for (var i = 0; i < lastWritten; i++) {
       if (norm[i] > 0.0001) output[i] /= norm[i];
     }
@@ -1219,9 +1301,9 @@
     };
   }
 
-  async function renderPitchedBuffer(decoded, rate) {
+  function renderPitchedBuffer(decoded, rate) {
     var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    if (!OAC) throw new Error("Offline audio rendering is unavailable in this browser.");
+    if (!OAC) return Promise.reject(new Error("Offline audio rendering is unavailable in this browser."));
 
     var outRate = 44100;
     var outChannels = Math.max(1, Math.min(2, decoded.numberOfChannels || 2));
@@ -1235,7 +1317,8 @@
         sampleRate: outRate
       });
     } catch (e) {
-      off = new OAC(outChannels, outLength, outRate);
+      try { off = new OAC(outChannels, outLength, outRate); }
+      catch (e2) { return Promise.reject(new Error("Could not create an OfflineAudioContext.")); }
     }
 
     var source = off.createBufferSource();
@@ -1244,8 +1327,7 @@
     source.connect(off.destination);
     source.start(0);
 
-    var rendered = await off.startRendering();
-    return bufferToPlain(rendered);
+    return off.startRendering().then(bufferToPlain);
   }
 
   function timeStretchBuffer(decoded, rate) {
@@ -1274,27 +1356,21 @@
     };
   }
 
-  /**
-   * Decode `file`, then render it at `rate` with or without pitch scaling.
-   * Returns a plain buffer object: { sampleRate, numberOfChannels, length, channels[] }.
-   */
-  async function renderAudio(file, rate, pitched) {
+  function renderAudio(file, rate, pitched) {
     if (!(window.AudioContext || window.webkitAudioContext)) {
-      throw new Error("Web Audio API is unavailable in this browser.");
+      return Promise.reject(new Error("Web Audio API is unavailable in this browser."));
     }
 
-    var arrayBuf = await file.arrayBuffer();
-    var decoded = await decodeAudioBuffer(arrayBuf, 44100);
-
-    if (!decoded) throw new Error("Could not decode the audio file.");
-
-    if (pitched) {
-      return await renderPitchedBuffer(decoded, rate);
-    }
-    return timeStretchBuffer(decoded, rate);
+    return file.arrayBuffer().then(function (arrayBuf) {
+      return decodeAudioBuffer(arrayBuf, 44100);
+    }).then(function (decoded) {
+      if (!decoded) throw new Error("Could not decode the audio file.");
+      if (pitched) return renderPitchedBuffer(decoded, rate);
+      return timeStretchBuffer(decoded, rate);
+    });
   }
 
-  /* ---------- Encoders (accept the plain buffer object) ---------- */
+  /* ---------- Encoders ---------- */
 
   function encodeWav(buf) {
     var numCh = buf.numberOfChannels;
@@ -1359,34 +1435,30 @@
     return new Blob(parts, { type: "audio/mpeg" });
   }
 
-  /**
-   * Returns { name, blob } for the audio that should land in the .osz,
-   * or null when the map has no audio sidecar.
-   */
-  async function prepareAudio(map, rate, pitched) {
+  function prepareAudio(map, rate, pitched) {
     var file = map.audioFile;
-    if (!file) return null;
-    if (rate === 1) return { name: file.name, blob: file };
+    if (!file) return Promise.resolve(null);
+    if (rate === 1) return Promise.resolve({ name: file.name, blob: file });
 
     var verb = rate > 1 ? "Speeding up" : "Slowing down";
     setBusyText(verb + " audio (" + fmtRate(rate) + "× · " +
                 (pitched ? "pitched" : "constant pitch") + ")…");
 
-    var rendered = await renderAudio(file, rate, pitched);
+    return renderAudio(file, rate, pitched).then(function (rendered) {
+      var base = String(file.name).replace(/\.[a-z0-9]+$/i, "") || "audio";
 
-    var base = String(file.name).replace(/\.[a-z0-9]+$/i, "") || "audio";
-
-    if (MP3_OK) {
-      try {
-        setBusyText("Encoding MP3…");
-        return { name: base + ".mp3", blob: encodeMp3(rendered) };
-      } catch (err) {
-        console.warn("MP3 encoding failed, falling back to WAV:", err);
+      if (MP3_OK) {
+        try {
+          setBusyText("Encoding MP3…");
+          return { name: base + ".mp3", blob: encodeMp3(rendered) };
+        } catch (err) {
+          console.warn("MP3 encoding failed, falling back to WAV:", err);
+        }
       }
-    }
 
-    setBusyText("Encoding WAV…");
-    return { name: base + ".wav", blob: encodeWav(rendered) };
+      setBusyText("Encoding WAV…");
+      return { name: base + ".wav", blob: encodeWav(rendered) };
+    });
   }
 
   /* =========================================================
@@ -1471,7 +1543,7 @@
     /* ---- [Difficulty] ---- */
     push("[Difficulty]");
     push("HPDrainRate:8");
-    push("CircleSize:" + keys);            // <<< KEY COUNT PRESERVED (1..18)
+    push("CircleSize:" + keys);            // 1..10 = osu!mania key count
     push("OverallDifficulty:8");
     push("ApproachRate:5");
     push("SliderMultiplier:1.4");
@@ -1499,7 +1571,6 @@
     for (var i = 0; i < tps.length; i++) {
       var tp = tps[i];
       var t = tp.time / rate;
-      // Faster rate → higher BPM → shorter beat length (and vice-versa).
       var beatLength = (60000 / tp.bpm) / rate;
       timingLines.push({
         time: t,
@@ -1512,7 +1583,6 @@
     for (var j = 0; j < svs.length; j++) {
       var sv = svs[j];
       var svTime = sv.time / rate;
-      // Multiplier is relative to the base scroll speed, so it stays as-is.
       var svBeatLength = -100 / sv.multiplier;
       timingLines.push({
         time: svTime,
@@ -1606,11 +1676,6 @@
     if (maps.length) render();
   }
 
-  /**
-   * @param {number} value            raw speed value
-   * @param {boolean} fromNumberInput when true, don't overwrite the number field
-   *                                  (the user is still typing in it).
-   */
   function applySpeed(value, fromNumberInput) {
     var rate = clampRate(value);
     var changed = rate !== speedRate;
@@ -1640,13 +1705,13 @@
     if (raw === "" || raw === "-" || raw === ".") return;
     var v = Number(raw);
     if (!isFinite(v)) return;
-    applySpeed(v, true);   // keep whatever the user typed on screen
+    applySpeed(v, true);
   });
 
   function commitNumberInput() {
     var v = Number(speedNumberEl.value);
     if (!isFinite(v) || speedNumberEl.value.trim() === "") v = speedRate;
-    applySpeed(v, false);  // normalises the displayed value
+    applySpeed(v, false);
   }
 
   speedNumberEl.addEventListener("change", commitNumberInput);
@@ -1667,9 +1732,9 @@
      Audio preview
      ========================================================= */
 
-  var previewAudio = null;    // HTMLAudioElement
-  var previewUrl = null;      // object URL for the current preview
-  var previewFileRef = null;  // File the element was created from
+  var previewAudio = null;
+  var previewUrl = null;
+  var previewFileRef = null;
 
   function setPreservesPitch(audioEl, preserve) {
     var props = ["preservesPitch", "mozPreservesPitch", "webkitPreservesPitch"];
@@ -1729,7 +1794,6 @@
       return;
     }
 
-    // If the source changed, drop the old element.
     if (previewAudio && previewFileRef !== file) {
       disposePreview();
     }
@@ -1758,7 +1822,6 @@
       previewFileRef = file;
     }
 
-    // Apply current settings before starting.
     try {
       previewAudio.playbackRate = speedRate;
       setPreservesPitch(previewAudio, !pitchShift);
@@ -1767,6 +1830,7 @@
 
     var p;
     try { p = previewAudio.play(); } catch (e) { p = Promise.reject(e); }
+
     if (!p || typeof p.then !== "function") {
       previewBtnEl.textContent = "■ Stop Preview";
       previewBtnEl.classList.add("playing");
@@ -1779,7 +1843,7 @@
       previewBtnEl.title = "Preview: " + file.name +
         " (rate " + fmtRate(speedRate) + "×, " +
         (pitchShift ? "pitched" : "constant pitch") + ")";
-    }).catch(function (err) {
+    }, function (err) {
       setStatus("Could not play preview: " + (err && err.message ? err.message : err), "err");
       stopPreview();
     });
@@ -1799,7 +1863,7 @@
 
   function tagRelativePath(file, path) {
     try { file.__relPath = path || file.webkitRelativePath || file.name; }
-    catch (e) { /* some browsers may not allow extending File */ }
+    catch (e) {}
     return file;
   }
 
@@ -1843,13 +1907,6 @@
     });
   }
 
-  /**
-   * Extract File[] from a drag/drop DataTransfer.
-   *
-   * IMPORTANT: we call `webkitGetAsEntry()` synchronously inside the Promise
-   * executor, which runs synchronously during the drop event. This is required
-   * because DataTransfer items become invalid after the event handler returns.
-   */
   function filesFromDataTransfer(dt) {
     return new Promise(function (resolve) {
       var out = [];
@@ -1887,77 +1944,91 @@
      Reading Quaver sources
      ========================================================= */
 
-  async function readQuaSources(files) {
+  function readQuaSources(files) {
     var sources = [];
     var packErrors = [];
-    var extracted = [];   // Files pulled out of .qp/.zip archives
+    var extracted = [];
 
-    // Loose .qua files
+    var looseChain = Promise.resolve();
     for (var i = 0; i < files.length; i++) {
-      var f = files[i];
-      if (/\.qua$/i.test(f.name)) {
-        try {
-          sources.push({
-            name: f.name,
-            path: f.__relPath || f.webkitRelativePath || f.name,
-            text: await f.text()
-          });
-        } catch (err) {
-          packErrors.push(f.name + ": " + err.message);
-        }
-      }
-    }
-
-    // .qp / .qzp / .zip archives
-    for (var j = 0; j < files.length; j++) {
-      var pf = files[j];
-      if (!/\.(qp|qzp|zip)$/i.test(pf.name)) continue;
-
-      if (typeof JSZip === "undefined") {
-        packErrors.push(pf.name + ": JSZip failed to load");
-        continue;
-      }
-
-      try {
-        var zip = await JSZip.loadAsync(pf);
-        var entries = Object.keys(zip.files).map(function (k) { return zip.files[k]; });
-
-        for (var k = 0; k < entries.length; k++) {
-          var entry = entries[k];
-          if (entry.dir) continue;
-
-          if (/\.qua$/i.test(entry.name)) {
-            try {
-              var text = await entry.async("string");
+      (function (f) {
+        if (/\.qua$/i.test(f.name)) {
+          looseChain = looseChain.then(function () {
+            return f.text().then(function (text) {
               sources.push({
-                name: entry.name.split("/").pop(),
-                path: entry.name,
+                name: f.name,
+                path: f.__relPath || f.webkitRelativePath || f.name,
                 text: text
               });
-            } catch (err) {
-              packErrors.push(entry.name + ": " + err.message);
-            }
-          } else if (isAudio(entry.name) || isImage(entry.name)) {
-            // Extract sidecar files so audio/bg get bundled even from .qp drops.
-            try {
-              var blob = await entry.async("blob");
-              var file = new File([blob], entry.name.split("/").pop(), { type: blob.type });
-              tagRelativePath(file, entry.name);
-              extracted.push(file);
-            } catch (err) { /* skip unreadable assets */ }
-          }
+            }, function (err) {
+              packErrors.push(f.name + ": " + (err && err.message ? err.message : err));
+            });
+          });
         }
-      } catch (err) {
-        packErrors.push(pf.name + ": " + err.message);
-      }
+      })(files[i]);
     }
 
-    return { sources: sources, errors: packErrors, extracted: extracted };
+    var archiveChain = looseChain.then(function () {
+      var chain = Promise.resolve();
+      for (var j = 0; j < files.length; j++) {
+        (function (pf) {
+          if (!/\.(qp|qzp|zip)$/i.test(pf.name)) return;
+
+          if (typeof JSZip === "undefined") {
+            packErrors.push(pf.name + ": JSZip failed to load");
+            return;
+          }
+
+          chain = chain.then(function () {
+            return JSZip.loadAsync(pf).then(function (zip) {
+              var entryNames = Object.keys(zip.files);
+              var innerChain = Promise.resolve();
+              for (var k = 0; k < entryNames.length; k++) {
+                (function (name) {
+                  var entry = zip.files[name];
+                  if (entry.dir) return;
+
+                  if (/\.qua$/i.test(entry.name)) {
+                    innerChain = innerChain.then(function () {
+                      return entry.async("string").then(function (text) {
+                        sources.push({
+                          name: entry.name.split("/").pop(),
+                          path: entry.name,
+                          text: text
+                        });
+                      }, function (err) {
+                        packErrors.push(entry.name + ": " + (err && err.message ? err.message : err));
+                      });
+                    });
+                  } else if (isAudio(entry.name) || isImage(entry.name)) {
+                    innerChain = innerChain.then(function () {
+                      return entry.async("blob").then(function (blob) {
+                        var file = new File([blob], entry.name.split("/").pop(), { type: blob.type });
+                        tagRelativePath(file, entry.name);
+                        extracted.push(file);
+                      }, function () {});
+                    });
+                  }
+                })(entryNames[k]);
+              }
+              return innerChain;
+            }, function (err) {
+              packErrors.push(pf.name + ": " + (err && err.message ? err.message : err));
+            });
+          });
+        })(files[j]);
+      }
+      return chain;
+    });
+
+    return archiveChain.then(function () {
+      return { sources: sources, errors: packErrors, extracted: extracted };
+    });
   }
 
   function buildSidecarIndex(files) {
-    var byFullPath = new Map();
-    var byBasename = new Map();
+    var byFullPath = Object.create(null);
+    var byBasename = Object.create(null);
 
     for (var i = 0; i < files.length; i++) {
       var f = files[i];
@@ -1966,8 +2037,8 @@
       var full = (f.__relPath || f.webkitRelativePath || f.name).toLowerCase();
       var base = f.name.toLowerCase();
 
-      if (!byFullPath.has(full)) byFullPath.set(full, f);
-      if (!byBasename.has(base)) byBasename.set(base, f);
+      if (!byFullPath[full]) byFullPath[full] = f;
+      if (!byBasename[base]) byBasename[base] = f;
     }
 
     return { byFullPath: byFullPath, byBasename: byBasename };
@@ -1976,26 +2047,26 @@
   function findSidecar(index, filename) {
     if (!filename) return null;
     var key = String(filename).toLowerCase();
-    if (index.byFullPath.has(key)) return index.byFullPath.get(key);
+    if (index.byFullPath[key]) return index.byFullPath[key];
     var base = key.split("/").pop();
-    if (index.byBasename.has(base)) return index.byBasename.get(base);
+    if (index.byBasename[base]) return index.byBasename[base];
     return null;
   }
 
   function guessAudio(index) {
-    var found = null;
-    index.byBasename.forEach(function (f) {
-      if (!found && isAudio(f.name)) found = f;
-    });
-    return found;
+    var keys = Object.keys(index.byBasename);
+    for (var i = 0; i < keys.length; i++) {
+      if (isAudio(keys[i])) return index.byBasename[keys[i]];
+    }
+    return null;
   }
 
   function guessBackground(index) {
-    var found = null;
-    index.byBasename.forEach(function (f) {
-      if (!found && isImage(f.name)) found = f;
-    });
-    return found;
+    var keys = Object.keys(index.byBasename);
+    for (var i = 0; i < keys.length; i++) {
+      if (isImage(keys[i])) return index.byBasename[keys[i]];
+    }
+    return null;
   }
 
   /* =========================================================
@@ -2012,14 +2083,27 @@
       throw new Error("File does not look like a Quaver map (empty or invalid YAML).");
     }
 
-    var keyCount = deriveKeyCount(data);
+    // ---- Key count (raw) ----
+    var rawKeys = deriveKeyCount(data);
+    if (rawKeys <= 0) rawKeys = 4;
+
+    if (rawKeys < MIN_KEYS) {
+      throw new Error("Map uses " + rawKeys + " key — the minimum supported is 1K.");
+    }
+    if (rawKeys > MAX_KEYS) {
+      throw new Error("Map uses " + rawKeys + "K — only 1K–10K is supported. " +
+                      "(Quaver's " + rawKeys + "K mode is out of range.)");
+    }
+
+    var keyCount = clampKeys(rawKeys);
+
     var notes = extractNotes(data, keyCount);
     var laneOffset = detectLaneOffset(notes, keyCount);
 
     var holdCount = 0;
     for (var i = 0; i < notes.length; i++) if (notes[i].end !== null) holdCount++;
 
-    // ---- BPM detection ----
+    // ---- BPM ----
     var parsedTps = parseTimingPoints(data);
     var bpmInfo = deriveBpm(data, notes, parsedTps);
     var bpm = bpmInfo.bpm;
@@ -2029,6 +2113,10 @@
     var length = Number(data.Length);
     if (!isFinite(length) || length <= 0) {
       length = notes.length ? notes[notes.length - 1].start : 0;
+    }
+    // Some Quaver files record length without holds; prefer last hold-end.
+    for (var i = 0; i < notes.length; i++) {
+      if (notes[i].end !== null && notes[i].end > length) length = notes[i].end;
     }
 
     var audioFile = findSidecar(sidecarIndex, data.AudioFile) || guessAudio(sidecarIndex);
@@ -2086,41 +2174,43 @@
     return map.osuText;
   }
 
-  async function buildOsz(map) {
+  function buildOsz(map) {
     var rate = speedRate;
     var pitched = pitchShift;
 
     if (map.oszBlob && map.oszRate === rate && map.oszPitch === pitched) {
-      return map.oszBlob;
+      return Promise.resolve(map.oszBlob);
     }
 
-    if (typeof JSZip === "undefined") throw new Error("JSZip failed to load.");
+    if (typeof JSZip === "undefined") {
+      return Promise.reject(new Error("JSZip failed to load."));
+    }
 
-    // Prepare the (possibly sped-up) audio first so the .osu can reference
-    // the exact filename that ends up inside the archive.
-    var audio = await prepareAudio(map, rate, pitched);
+    return prepareAudio(map, rate, pitched).then(function (audio) {
+      map.osuText = buildOsuText(map, audio ? audio.name : null);
 
-    map.osuText = buildOsuText(map, audio ? audio.name : null);
+      setBusyText("Packaging .osz…");
+      var zip = new JSZip();
+      var base = sanitizeFilename(
+        map.meta.artist + " - " + displayTitle(map) +
+        " (" + map.meta.creator + ") [" + displayVersion(map) + "]"
+      );
 
-    setBusyText("Packaging .osz…");
-    var zip = new JSZip();
-    var base = sanitizeFilename(
-      map.meta.artist + " - " + displayTitle(map) +
-      " (" + map.meta.creator + ") [" + displayVersion(map) + "]"
-    );
+      zip.file(base + ".osu", map.osuText);
+      if (audio) zip.file(audio.name, audio.blob);
+      if (map.bgFile) zip.file(map.bgFile.name, map.bgFile);
 
-    zip.file(base + ".osu", map.osuText);
-    if (audio) zip.file(audio.name, audio.blob);
-    if (map.bgFile) zip.file(map.bgFile.name, map.bgFile);
-
-    map.oszBlob = await zip.generateAsync({
-      type: "blob",
-      compression: "DEFLATE",
-      compressionOptions: { level: 6 }
+      return zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 }
+      }).then(function (blob) {
+        map.oszBlob = blob;
+        map.oszRate = rate;
+        map.oszPitch = pitched;
+        return blob;
+      });
     });
-    map.oszRate = rate;
-    map.oszPitch = pitched;
-    return map.oszBlob;
   }
 
   function osuFilename(map) {
@@ -2142,12 +2232,9 @@
      ========================================================= */
 
   function keyBadgeClass(keys) {
-    if (keys <= 3) return "k-low";
-    if (keys === 4) return "k4";
-    if (keys === 5 || keys === 6) return "k5-6";
-    if (keys === 7) return "k7";
-    if (keys === 8 || keys === 9) return "k8-9";
-    return "k-high";
+    if (keys < 1) keys = 1;
+    if (keys > 10) keys = 10;
+    return "k" + keys;
   }
 
   function renderCard(map) {
@@ -2157,6 +2244,9 @@
 
     var shownBpm = m.bpm > 0 ? m.bpm * rate : 0;
     var shownLength = m.length / rate;
+
+    // KPS: compute against the exported (scaled) timeline
+    var kps = computeKps(map.notes, rate);
 
     var chips = [
       '<span class="chip diff">' + esc(m.difficultyName) + "</span>"
@@ -2185,6 +2275,14 @@
     if (m.svCount > 0) chips.push('<span class="chip">' + m.svCount + " SV</span>");
     chips.push('<span class="chip">' + formatLength(shownLength) + "</span>");
 
+    // KPS chips
+    if (kps.avg > 0) {
+      chips.push('<span class="chip kps">' + fmtKpsAvg(kps.avg) + " avg KPS</span>");
+    }
+    if (kps.peak > 0) {
+      chips.push('<span class="chip kps-peak">' + kps.peak + " peak KPS</span>");
+    }
+
     if (m.laneOffset > 0) {
       chips.push('<span class="chip fix">↔ 1-indexed lanes → shifted</span>');
     }
@@ -2204,18 +2302,17 @@
       ? '<div class="card-note err">⚠ ' + esc(map.error) + "</div>"
       : "";
 
-    // BPM detection note
     var bpmNoteHtml = "";
     if (m.bpmSource === "notes") {
       bpmNoteHtml = '<div class="card-note bpm">🎵 BPM auto-detected from note spacing: <strong>' +
-        fmtBpm(m.bpm) + " BPM</strong>. The original file had no usable timing points or top-level BPM, " +
+        fmtBpm(m.bpm) + " BPM</strong>. The file had no usable timing points or top-level BPM, " +
         "so this is a best-effort estimate.</div>";
     } else if (m.bpmSource === "default") {
       bpmNoteHtml = '<div class="card-note bpm">🎵 Could not detect BPM from the file or its notes — ' +
         "falling back to <strong>120 BPM</strong>. You may want to fix the timing after import.</div>";
     } else if (m.bpmSource === "timing" && m.bpmChanges > 0) {
       bpmNoteHtml = '<div class="card-note bpm">🎵 ' + (m.bpmChanges + 1) +
-        " BPM points detected (base <strong>" + fmtBpm(m.bpm) + " BPM</strong>) — all preserved in the .osu.</div>";
+        " BPM values detected (base <strong>" + fmtBpm(m.bpm) + " BPM</strong>) — all preserved in the .osu.</div>";
     }
 
     var speedHtml = sped
@@ -2254,8 +2351,7 @@
     return (
       '<article class="' + cardClasses + '" data-id="' + map.id + '">' +
         '<div class="card-head">' +
-          '<div class="keys-badge ' + keyBadgeClass(m.keyCount) +
-            (m.keyCount >= 10 ? " wide" : "") + '">' + m.keyCount + "K</div>" +
+          '<div class="keys-badge ' + keyBadgeClass(m.keyCount) + '">' + m.keyCount + "K</div>" +
           '<div class="info">' +
             "<h3>" + esc(m.title) + "</h3>" +
             '<p class="artist">' + esc(m.artist) + "</p>" +
@@ -2313,102 +2409,110 @@
   var ingestQueue = [];
   var ingestRunning = false;
 
-  async function addFiles(fileList) {
+  function addFiles(fileList) {
     var files = Array.prototype.slice.call(fileList || []);
-    if (!files.length) return;
+    if (!files.length) return Promise.resolve();
     ingestQueue.push(files);
-    if (!ingestRunning) await drainIngestQueue();
+    if (!ingestRunning) return drainIngestQueue();
+    return Promise.resolve();
   }
 
-  async function drainIngestQueue() {
+  function drainIngestQueue() {
     ingestRunning = true;
-    try {
-      while (ingestQueue.length) {
+    return new Promise(function (resolve) {
+      function next() {
+        if (!ingestQueue.length) {
+          ingestRunning = false;
+          resolve();
+          return;
+        }
         var files = ingestQueue.shift();
-        try {
-          await processFiles(files);
-        } catch (err) {
+        processFiles(files).then(next, function (err) {
           console.error("Ingest error:", err);
           setStatus("Error processing files: " + (err && err.message ? err.message : err), "err");
-        }
+          next();
+        });
       }
-    } finally {
-      ingestRunning = false;
-    }
+      next();
+    });
   }
 
-  async function processFiles(files) {
-    // Make sure every File has a relative path hint for sidecar lookup.
+  function processFiles(files) {
     files.forEach(function (f) {
       if (!f.__relPath) tagRelativePath(f, f.webkitRelativePath || f.name);
     });
 
     setStatus("Reading " + files.length + " file" + (files.length === 1 ? "" : "s") + "…");
 
-    var result = await readQuaSources(files);
+    return readQuaSources(files).then(function (result) {
+      var allSidecars = files.concat(result.extracted || []);
+      var sidecarIndex = buildSidecarIndex(allSidecars);
 
-    // Build the sidecar index from BOTH the dropped files and any files
-    // we extracted out of .qp archives.
-    var allSidecars = files.concat(result.extracted || []);
-    var sidecarIndex = buildSidecarIndex(allSidecars);
-
-    if (!result.sources.length) {
-      setStatus(
-        "No Quaver maps found. Drop .qua files, a .qp pack, or a folder containing them." +
-        (result.errors.length ? " (" + result.errors.join("; ") + ")" : ""),
-        "err"
-      );
-      return;
-    }
-
-    var added = 0;
-    var failed = [];
-    var autoDetected = 0;
-
-    for (var i = 0; i < result.sources.length; i++) {
-      var src = result.sources[i];
-      try {
-        var map = parseQuaSource(src, sidecarIndex);
-        if (map.meta.noteCount === 0) {
-          failed.push(src.name + ": no hit objects");
-          continue;
-        }
-
-        var dup = maps.some(function (m) {
-          return m.filePath === map.filePath &&
-                 m.meta.difficultyName === map.meta.difficultyName &&
-                 m.meta.keyCount === map.meta.keyCount;
-        });
-        if (dup) continue;
-
-        if (map.meta.bpmSource === "notes") autoDetected++;
-        maps.push(map);
-        added++;
-      } catch (err) {
-        failed.push(src.name + ": " + (err && err.message ? err.message : err));
+      if (!result.sources.length) {
+        setStatus(
+          "No Quaver maps found. Drop .qua files, a .qp pack, or a folder containing them." +
+          (result.errors.length ? " (" + result.errors.join("; ") + ")" : ""),
+          "err"
+        );
+        return;
       }
-    }
 
-    render();
+      var added = 0;
+      var failed = [];
+      var autoDetected = 0;
+      var rejected = [];
 
-    var msg = "Loaded " + added + " map" + (added === 1 ? "" : "s") + ".";
-    if (autoDetected > 0) {
-      msg += " " + autoDetected + " BPM value" + (autoDetected === 1 ? " was" : "s were") +
-             " auto-detected from note spacing.";
-    }
-    if (result.errors.length) msg += " Pack errors: " + result.errors.join("; ");
-    if (failed.length) msg += " Skipped: " + failed.join("; ");
-    setStatus(msg, added ? "ok" : "err");
+      for (var i = 0; i < result.sources.length; i++) {
+        var src = result.sources[i];
+        try {
+          var map = parseQuaSource(src, sidecarIndex);
+          if (map.meta.noteCount === 0) {
+            failed.push(src.name + ": no hit objects");
+            continue;
+          }
+
+          var dup = maps.some(function (m) {
+            return m.filePath === map.filePath &&
+                   m.meta.difficultyName === map.meta.difficultyName &&
+                   m.meta.keyCount === map.meta.keyCount;
+          });
+          if (dup) continue;
+
+          if (map.meta.bpmSource === "notes") autoDetected++;
+          maps.push(map);
+          added++;
+        } catch (err) {
+          var msg = err && err.message ? err.message : String(err);
+          if (/only 1K|minimum supported/.test(msg)) {
+            rejected.push(src.name + ": " + msg);
+          } else {
+            failed.push(src.name + ": " + msg);
+          }
+        }
+      }
+
+      render();
+
+      var statusMsg = "Loaded " + added + " map" + (added === 1 ? "" : "s") + ".";
+      if (autoDetected > 0) {
+        statusMsg += " " + autoDetected + " BPM value" + (autoDetected === 1 ? " was" : "s were") +
+                     " auto-detected from note spacing.";
+      }
+      if (rejected.length) statusMsg += " Rejected (out of 1K–10K range): " + rejected.join("; ");
+      if (result.errors.length) statusMsg += " Pack errors: " + result.errors.join("; ");
+      if (failed.length) statusMsg += " Skipped: " + failed.join("; ");
+
+      setStatus(statusMsg, added ? "ok" : "err");
+    });
   }
 
   /* =========================================================
      Convert handlers
      ========================================================= */
 
-  async function convertAndDownloadOsz(map) {
+  function convertAndDownloadOsz(map) {
     setBusy(true, "Building .osz…");
-    try {
-      var blob = await buildOsz(map);
+    return buildOsz(map).then(function (blob) {
       downloadBlob(blob, oszFilename(map));
       map.converted = true;
       map.error = null;
@@ -2423,48 +2527,51 @@
         (map.laneOffset > 0 ? " (1-indexed lanes shifted down by 1)" : ""),
         "ok"
       );
-    } catch (err) {
+    }, function (err) {
       map.error = err && err.message ? err.message : String(err);
       render();
       setStatus("Conversion failed: " + map.error, "err");
-    } finally {
+    }).then(function () {
       setBusy(false);
-    }
+    });
   }
 
-  async function convertAllAndDownload() {
+  function convertAllAndDownload() {
     var pending = maps.filter(function (m) { return !m.converted && !m.error; });
     if (!pending.length) return;
 
     setBusy(true, "Converting " + pending.length + " map" + (pending.length === 1 ? "" : "s") + "…");
     var ok = 0, fail = 0;
 
+    var chain = Promise.resolve();
     for (var i = 0; i < pending.length; i++) {
-      var map = pending[i];
-      try {
-        setBusyText(
-          "Building .osz " + (i + 1) + "/" + pending.length +
-          (speedRate !== 1 ? " (" + fmtRate(speedRate) + "× speed)" : "") + "…"
-        );
-        var blob = await buildOsz(map);
-        downloadBlob(blob, oszFilename(map));
-        map.converted = true;
-        map.error = null;
-        ok++;
-        // Small delay so the browser doesn't drop concurrent downloads.
-        await new Promise(function (r) { setTimeout(r, 300); });
-      } catch (err) {
-        map.error = err && err.message ? err.message : String(err);
-        fail++;
-      }
+      (function (map, idx) {
+        chain = chain.then(function () {
+          setBusyText(
+            "Building .osz " + (idx + 1) + "/" + pending.length +
+            (speedRate !== 1 ? " (" + fmtRate(speedRate) + "× speed)" : "") + "…"
+          );
+          return buildOsz(map).then(function (blob) {
+            downloadBlob(blob, oszFilename(map));
+            map.converted = true;
+            map.error = null;
+            ok++;
+            return new Promise(function (r) { setTimeout(r, 300); });
+          }, function (err) {
+            map.error = err && err.message ? err.message : String(err);
+            fail++;
+          });
+        });
+      })(pending[i], i);
     }
 
-    render();
-    setBusy(false);
-
-    var msg = "Converted " + ok + " map" + (ok === 1 ? "" : "s") + " to .osz.";
-    if (fail) msg += " " + fail + " failed.";
-    setStatus(msg, ok ? "ok" : "err");
+    return chain.then(function () {
+      render();
+      setBusy(false);
+      var msg = "Converted " + ok + " map" + (ok === 1 ? "" : "s") + " to .osz.";
+      if (fail) msg += " " + fail + " failed.";
+      setStatus(msg, ok ? "ok" : "err");
+    });
   }
 
   /* =========================================================
@@ -2475,8 +2582,8 @@
     return function (e) {
       try {
         var r = fn(e);
-        if (r && typeof r.catch === "function") {
-          r.catch(function (err) {
+        if (r && typeof r.then === "function") {
+          r.then(null, function (err) {
             console.error("Handler error:", err);
             setStatus("Unexpected error: " + (err && err.message ? err.message : err), "err");
             setBusy(false);
@@ -2508,13 +2615,13 @@
   fileInputEl.addEventListener("change", safeHandler(function () {
     var files = Array.prototype.slice.call(fileInputEl.files || []);
     fileInputEl.value = "";
-    addFiles(files);
+    return addFiles(files);
   }));
 
   folderInputEl.addEventListener("change", safeHandler(function () {
     var files = Array.prototype.slice.call(folderInputEl.files || []);
     folderInputEl.value = "";
-    addFiles(files);
+    return addFiles(files);
   }));
 
   ["dragenter", "dragover"].forEach(function (evt) {
@@ -2537,10 +2644,9 @@
     e.preventDefault();
     e.stopPropagation();
     dropzoneEl.classList.remove("over");
-    // Snapshot the DataTransfer entries synchronously before any await.
     var dt = e.dataTransfer;
     return filesFromDataTransfer(dt).then(function (files) {
-      addFiles(files);
+      return addFiles(files);
     });
   }));
 
@@ -2567,9 +2673,9 @@
       setBusy(true, "Rebuilding .osz…");
       return buildOsz(map).then(function (blob) {
         downloadBlob(blob, oszFilename(map));
-      }).catch(function (err) {
+      }, function (err) {
         setStatus("Could not build .osz: " + (err && err.message ? err.message : err), "err");
-      }).finally(function () {
+      }).then(function () {
         setBusy(false);
       });
     }
@@ -2620,9 +2726,14 @@
     if (missing.length) {
       setStatus(
         "Warning: could not load " + missing.join(" and ") +
-        " from the CDN. YAML parsing and .osz support may be unavailable.",
+        " from the CDN. YAML parsing and .osz support may be unavailable. " +
+        "Check your internet connection and reload.",
         "err"
       );
+    }
+    if (!MP3_OK) {
+      // Not fatal, just informational — WAV will be used for sped-up audio.
+      console.info("lamejs not available — sped-up audio will be exported as WAV.");
     }
   });
 
