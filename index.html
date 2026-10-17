@@ -505,6 +505,98 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .busy-overlay p { color: var(--text); font-size: 14px; margin: 0; }
 
+  /* ---------- Skin Preview Modal ---------- */
+  
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(6, 7, 12, .85);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+  }
+  .modal-content {
+    background: linear-gradient(180deg, var(--panel), var(--bg-2));
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    max-width: 90vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    animation: rise .2s ease both;
+  }
+  .modal-content h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .skin-preview {
+    display: flex;
+    gap: 0;
+    background: #000;
+    border: 2px solid var(--border-2);
+    border-radius: 8px;
+    height: 400px;
+    width: 256px; /* 4 columns * 64px */
+    position: relative;
+    overflow: hidden;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+  }
+  .skin-preview-col {
+    width: 64px;
+    height: 100%;
+    position: relative;
+    border-right: 1px solid rgba(255,255,255,0.1);
+  }
+  .skin-preview-col:last-child { border-right: none; }
+  .preview-key {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    z-index: 10;
+  }
+  .preview-note {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    z-index: 5;
+  }
+  .preview-hold-body {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    z-index: 2;
+  }
+  .preview-hold-head {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    z-index: 3;
+  }
+  .preview-hold-tail {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    z-index: 3;
+  }
+
   @media (max-width: 760px) {
     .speed-divider { display: none; }
     .speed-label { min-width: 0; }
@@ -614,6 +706,15 @@
   <p id="busyText">Working…</p>
 </div>
 
+<!-- Skin Preview Modal -->
+<div class="modal-overlay hidden" id="skinModal">
+  <div class="modal-content">
+    <h2 id="skinModalTitle">Skin Preview</h2>
+    <div class="skin-preview" id="skinPreviewPlayfield"></div>
+    <button class="btn ghost" id="closeSkinModalBtn">Close Preview</button>
+  </div>
+</div>
+
 <script>
 (function () {
   "use strict";
@@ -648,7 +749,44 @@
      ========================================================= */
 
   var SKIN_NAME_PATTERNS = [
-    // Holds (must come before generic note patterns)
+    // ==========================================
+    // QUAVER SKIN SPECIFIC MAPPINGS
+    // (These take priority over generic matches)
+    // ==========================================
+    
+    // Holds (Must precede generic note patterns)
+    { pattern: /note-holdhitobject/i, osu: "mania-hold{col}H.png" }, // Hold Head
+    { pattern: /note-holdend/i, osu: "mania-hold{col}L.png" },       // Hold Tail
+    { pattern: /note-holdbody/i, osu: "mania-hold{col}.png" },       // Hold Body
+    
+    // Notes
+    // The negative lookahead (?!-sheet) prevents the @9x1 sprite sheet from being mapped as a single note
+    { pattern: /note-hitobject(?!-sheet)/i, osu: "mania-note{col}.png" }, 
+
+    // Receptors
+    { pattern: /receptor-down/i, osu: "mania-key{col}D.png" },       // Pressed Key
+    { pattern: /receptor-up/i, osu: "mania-key{col}.png" },          // Unpressed Key
+
+    // Lighting
+    { pattern: /column-lighting/i, osu: "mania-stage-light.png" },   // Column Lighting
+    { pattern: /hitlighting/i, osu: "lightingN.png" },               // Hit Lighting
+    { pattern: /holdlighting/i, osu: "lightingL.png" },              // Hold Lighting
+
+    // Stage / Playfield
+    { pattern: /cover-top/i, osu: "mania-stage-top.png" },
+    { pattern: /cover-bottom/i, osu: "mania-stage-bottom.png" },
+    { pattern: /stage-left-border/i, osu: "mania-stage-left.png" },
+    { pattern: /stage-right-border/i, osu: "mania-stage-right.png" },
+    { pattern: /stage-hitposition-overlay/i, osu: "mania-stage-hint.png" },
+    { pattern: /stage-distant-overlay/i, osu: "mania-stage-distant.png" },
+    { pattern: /stage-bgmask/i, osu: "mania-stage-bgmask.png" },
+    { pattern: /stage-timingbar/i, osu: "mania-stage-bottom.png" },
+
+    // ==========================================
+    // GENERIC / FALLBACK MAPPINGS
+    // ==========================================
+    
+    // Holds
     { pattern: /holdbody|hold_body|hold-body|longnote.*body|ln.*body/i, osu: "mania-hold{col}.png" },
     { pattern: /holdhead|hold_head|hold-head|ln.*head|longnote.*head/i, osu: "mania-hold{col}H.png" },
     { pattern: /holdtail|hold_tail|hold-end|holdend|ln.*tail|longnote.*tail/i, osu: "mania-hold{col}L.png" },
@@ -1590,15 +1728,17 @@
   /**
    * Package matched skin images into a ZIP using osu!mania filenames.
    * `keyCount` controls replication of column-agnostic images.
-   * Returns { matched, missing, filled } — filled is the list of names written.
+   * Returns { matched, missing, filled, displayFiles, skinMappings }
    */
   function packageSkinImages(zip, skinInfo, sidecarIndex, keyCount) {
     var matched = 0;
     var missing = 0;
     var filled = {};
+    var displayFiles = {};
+    var skinMappings = [];
 
     if (!skinInfo || !skinInfo.classified) {
-      return { matched: 0, missing: 0, filled: filled };
+      return { matched: 0, missing: 0, filled: filled, displayFiles: displayFiles, skinMappings: skinMappings };
     }
 
     // First pass: column-specific images take priority
@@ -1615,7 +1755,7 @@
     // Apply column-specific images
     for (var i = 0; i < columnSpecific.length; i++) {
       var entry = columnSpecific[i];
-      if (entry.col >= keyCount) continue;  // Out of range for this map
+      if (entry.col >= keyCount) continue;
 
       var file = findSkinImageFile(entry.item.path, sidecarIndex);
       if (!file) { missing++; continue; }
@@ -1626,8 +1766,11 @@
       }
 
       if (filled[osuName]) continue;
-      filled[osuName] = true;
-      zip.file(osuName, file);
+      filled[osuName] = file;
+      displayFiles[osuName] = URL.createObjectURL(file);
+      skinMappings.push({ sourceFile: file.name, osuName: osuName });
+      
+      if (zip) zip.file(osuName, file);
       matched++;
     }
 
@@ -1643,19 +1786,25 @@
         for (var c = 1; c <= keyCount; c++) {
           var name = osuPattern.replace("{col}", String(c));
           if (filled[name]) continue;
-          filled[name] = true;
-          zip.file(name, file);
+          filled[name] = file;
+          displayFiles[name] = URL.createObjectURL(file);
+          skinMappings.push({ sourceFile: file.name, osuName: name });
+          
+          if (zip) zip.file(name, file);
           matched++;
         }
       } else {
         if (filled[osuPattern]) continue;
-        filled[osuPattern] = true;
-        zip.file(osuPattern, file);
+        filled[osuPattern] = file;
+        displayFiles[osuPattern] = URL.createObjectURL(file);
+        skinMappings.push({ sourceFile: file.name, osuName: osuPattern });
+        
+        if (zip) zip.file(osuPattern, file);
         matched++;
       }
     }
 
-    return { matched: matched, missing: missing, filled: filled };
+    return { matched: matched, missing: missing, filled: filled, displayFiles: displayFiles, skinMappings: skinMappings };
   }
 
   /** Build a standalone .osk skin file from a Quaver skin. */
@@ -1730,7 +1879,9 @@
         blob: blob,
         matched: result.matched,
         missing: result.missing,
-        keyCount: detectedKeys
+        keyCount: detectedKeys,
+        displayFiles: result.displayFiles,
+        skinMappings: result.skinMappings
       };
     });
   }
@@ -2202,7 +2353,7 @@
      ========================================================= */
 
   var maps = [];
-  var skins = [];  // { id, name, author, skinInfo, sidecarIndex, sourcePath, fileCount, error }
+  var skins = [];
   var uid = 0;
 
   var dropzoneEl   = document.getElementById("dropzone");
@@ -2224,6 +2375,11 @@
   var pitchToggleEl = document.getElementById("pitchToggle");
   var pitchHintEl   = document.getElementById("pitchHint");
   var previewBtnEl  = document.getElementById("previewBtn");
+
+  var skinModalEl   = document.getElementById("skinModal");
+  var closeSkinBtn  = document.getElementById("closeSkinModalBtn");
+  var skinModalTitle= document.getElementById("skinModalTitle");
+  var skinPreviewEl = document.getElementById("skinPreviewPlayfield");
 
   function setStatus(msg, kind) {
     statusEl.textContent = msg || "";
@@ -2435,6 +2591,108 @@
   });
 
   /* =========================================================
+     Skin Preview Modal
+     ========================================================= */
+
+  function openSkinModal(skin) {
+    if (!skin.displayFiles || Object.keys(skin.displayFiles).length === 0) {
+      setStatus("No mapped files available to preview.", "err");
+      return;
+    }
+
+    var files = skin.displayFiles;
+    var keyCount = skin.keyCount || 4;
+    
+    // Limit preview to 7 columns to prevent the modal from being too wide
+    var displayCols = Math.min(keyCount, 7); 
+    
+    skinModalTitle.textContent = (skin.skinInfo.name || "Skin") + " — Preview (" + displayCols + "K)";
+    skinPreviewEl.innerHTML = "";
+    skinPreviewEl.style.width = (displayCols * 64) + "px";
+
+    for (var i = 1; i <= displayCols; i++) {
+      var col = document.createElement("div");
+      col.className = "skin-preview-col";
+      
+      // 1. Key (Unpressed)
+      if (files["mania-key" + i + ".png"]) {
+        var keyImg = document.createElement("img");
+        keyImg.src = files["mania-key" + i + ".png"];
+        keyImg.className = "preview-key";
+        col.appendChild(keyImg);
+      }
+
+      // 2. Pressed Key (column 2)
+      if (i === 2 && files["mania-key2D.png"]) {
+        col.innerHTML = ""; // override
+        var pressedImg = document.createElement("img");
+        pressedImg.src = files["mania-key2D.png"];
+        pressedImg.className = "preview-key";
+        col.appendChild(pressedImg);
+      }
+
+      // 3. Falling Note (column 1)
+      if (i === 1 && files["mania-note1.png"]) {
+        var noteImg = document.createElement("img");
+        noteImg.src = files["mania-note1.png"];
+        noteImg.className = "preview-note";
+        noteImg.style.bottom = "250px";
+        col.appendChild(noteImg);
+      }
+
+      // 4. Hit Note (column 2)
+      if (i === 2 && files["mania-note2.png"]) {
+        var hitNoteImg = document.createElement("img");
+        hitNoteImg.src = files["mania-note2.png"];
+        hitNoteImg.className = "preview-note";
+        hitNoteImg.style.bottom = "10px";
+        col.appendChild(hitNoteImg);
+      }
+
+      // 5. Hold Note (column 3)
+      if (i === 3) {
+        if (files["mania-hold3.png"]) {
+          var body = document.createElement("div");
+          body.className = "preview-hold-body";
+          body.style.backgroundImage = "url(" + files["mania-hold3.png"] + ")";
+          body.style.backgroundSize = "100% 100%";
+          body.style.height = "150px";
+          body.style.bottom = "20px";
+          col.appendChild(body);
+        }
+        if (files["mania-hold3L.png"]) {
+          var tail = document.createElement("img");
+          tail.src = files["mania-hold3L.png"];
+          tail.className = "preview-hold-tail";
+          tail.style.bottom = "20px";
+          col.appendChild(tail);
+        }
+        if (files["mania-hold3H.png"]) {
+          var head = document.createElement("img");
+          head.src = files["mania-hold3H.png"];
+          head.className = "preview-hold-head";
+          head.style.bottom = "150px";
+          col.appendChild(head);
+        }
+      }
+
+      skinPreviewEl.appendChild(col);
+    }
+
+    skinModalEl.classList.remove("hidden");
+  }
+
+  function closeSkinModal() {
+    skinModalEl.classList.add("hidden");
+    skinPreviewEl.innerHTML = ""; // Free up memory
+  }
+
+  closeSkinBtn.addEventListener("click", closeSkinModal);
+  skinModalEl.addEventListener("click", function(e) {
+    if (e.target === skinModalEl) closeSkinModal();
+  });
+
+  /* =========================================================
      Folder / file collection
      ========================================================= */
 
@@ -2590,7 +2848,6 @@
                   parsed: parsed
                 });
               }
-              // Unknown .qs files are silently ignored
             }, function (err) {
               packErrors.push(f.name + ": " + (err && err.message ? err.message : err));
             });
@@ -2616,7 +2873,6 @@
               var chartEntry = null;
               var innerChain = Promise.resolve();
 
-              // Prefer the canonical chart entry.
               for (var k = 0; k < entryNames.length; k++) {
                 var e = zip.files[entryNames[k]];
                 if (e.dir) continue;
@@ -2764,19 +3020,16 @@
   function guessAudio(index) {
     var keys = Object.keys(index.byBasename);
 
-    // Prefer well-named song/audio files
     for (var i = 0; i < keys.length; i++) {
       if (/^(song|audio|music)\.(mp3|ogg|wav|m4a|flac)$/i.test(keys[i])) {
         return index.byBasename[keys[i]];
       }
     }
 
-    // Prefer mp3
     for (var i = 0; i < keys.length; i++) {
       if (/\.mp3$/i.test(keys[i])) return index.byBasename[keys[i]];
     }
 
-    // Any audio
     for (var i = 0; i < keys.length; i++) {
       if (isAudio(keys[i])) return index.byBasename[keys[i]];
     }
@@ -2787,14 +3040,12 @@
   function guessBackground(index) {
     var keys = Object.keys(index.byBasename);
 
-    // Prefer well-named bg files
     for (var i = 0; i < keys.length; i++) {
       if (/^(bg|background|back|album|cover)\.(png|jpg|jpeg|gif|bmp|webp)$/i.test(keys[i])) {
         return index.byBasename[keys[i]];
       }
     }
 
-    // Any image
     for (var i = 0; i < keys.length; i++) {
       if (isImage(keys[i])) return index.byBasename[keys[i]];
     }
@@ -3250,6 +3501,17 @@
         " could not be found in the drop. Only matched sprites will be bundled.</div>";
     }
 
+    var detailsHtml = "";
+    if (skin.skinMappings && skin.skinMappings.length > 0) {
+      detailsHtml = '<details style="flex: 1 1 100%; margin-top: 8px;">' +
+        '<summary style="cursor: pointer; font-size: 12px; color: var(--muted);">View converted files (' + skin.skinMappings.length + ')</summary>' +
+        '<div style="max-height: 150px; overflow-y: auto; margin-top: 8px; font-family: monospace; font-size: 11px; line-height: 1.6; color: var(--muted); background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px;">' +
+        skin.skinMappings.map(function (m) {
+          return '<div>' + esc(m.sourceFile) + ' &rarr; <span style="color: var(--good);">' + esc(m.osuName) + '</span></div>';
+        }).join("") +
+        '</div></details>';
+    }
+
     var cardClasses = "card skin-card";
     if (skin.error) cardClasses += " errored";
 
@@ -3267,10 +3529,13 @@
         '<div class="card-actions">' +
           '<button class="btn skin" data-action="download-osk" data-id="' + skin.id + '"' +
             (matchedCount === 0 ? " disabled" : "") + ">⬇ Download as .osk</button>" +
+          '<button class="btn ghost" data-action="preview-skin" data-id="' + skin.id + '"' +
+            (matchedCount === 0 ? " disabled" : "") + ">👁️ Preview Skin</button>" +
           '<button class="btn ghost" data-action="remove-skin" data-id="' + skin.id + '">✕</button>' +
           errHtml +
           noteHtml +
           skinHintHtml +
+          detailsHtml +
         "</div>" +
       "</article>"
     );
@@ -3397,6 +3662,9 @@
         });
         if (dupSkin) continue;
 
+        // Build display files and mapping immediately for the UI
+        var pkg = packageSkinImages(null, s.parsed, sidecarIndex, 10);
+
         var skinRecord = {
           id: "s" + (++uid),
           fileName: s.name,
@@ -3404,7 +3672,9 @@
           skinInfo: s.parsed,
           sidecarIndex: sidecarIndex,
           downloaded: false,
-          error: null
+          error: null,
+          displayFiles: pkg.displayFiles,
+          skinMappings: pkg.skinMappings
         };
         skins.push(skinRecord);
         skinsInDrop.push(skinRecord);
@@ -3739,6 +4009,10 @@
 
       if (action === "download-osk") {
         return downloadSkinAsOsk(skin);
+      }
+      if (action === "preview-skin") {
+        openSkinModal(skin);
+        return;
       }
       if (action === "remove-skin") {
         skins = skins.filter(function (s) { return s.id !== id; });
