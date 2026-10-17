@@ -22,6 +22,7 @@
     --good: #35d07f;
     --warn: #ffb454;
     --bad: #ff6b6b;
+    --skin-accent: #ff8ab4;
     --radius: 14px;
   }
 
@@ -119,6 +120,13 @@
     color: #7ff0b4;
   }
   .btn.good:hover:not(:disabled) { background: rgba(53, 208, 127, .22); }
+
+  .btn.skin {
+    background: rgba(255, 138, 180, .14);
+    border-color: rgba(255, 138, 180, .5);
+    color: #ffc2d9;
+  }
+  .btn.skin:hover:not(:disabled) { background: rgba(255, 138, 180, .24); }
 
   .btn.ghost { background: transparent; border-color: var(--border-2); color: var(--muted); }
   .btn.ghost:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,.04); }
@@ -321,6 +329,7 @@
   }
   .card.converted { border-color: rgba(53, 208, 127, .38); }
   .card.errored   { border-color: rgba(255, 107, 107, .35); }
+  .card.skin-card { border-color: rgba(255, 138, 180, .28); }
 
   .card-head { display: flex; gap: 14px; align-items: flex-start; }
 
@@ -350,6 +359,7 @@
   .keys-badge.k8     { background: linear-gradient(135deg,#ff5b8a,#a06cff); }
   .keys-badge.k9     { background: linear-gradient(135deg,#a06cff,#ff5b8a); }
   .keys-badge.k10    { background: linear-gradient(135deg,#f2c14e,#ff8a3d); }
+  .keys-badge.sk     { background: linear-gradient(135deg,#ff8ab4,#a06cff); font-size: 14px; }
 
   .info { flex: 1 1 auto; min-width: 0; }
   .info h3 {
@@ -434,6 +444,11 @@
     background: rgba(212,196,255,.07);
     font-weight: 500;
   }
+  .chip.skin-chip {
+    color: #ffc2d9;
+    border-color: rgba(255,138,180,.45);
+    background: rgba(255,138,180,.10);
+  }
 
   .card-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
   .card-note {
@@ -447,6 +462,7 @@
   .card-note.speed { color: #9fc4ff; }
   .card-note.bpm { color: #6ce0ff; }
   .card-note.sv { color: #ffb3d1; }
+  .card-note.skin-note { color: #ffc2d9; }
   .card-note code { background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 5px; font-size: 11.5px; }
 
   .hidden { display: none !important; }
@@ -625,6 +641,42 @@
   var AUDIO_EXTS = ["mp3", "ogg", "wav", "m4a", "flac"];
   var IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
   var ARCHIVE_EXTS = ["qp", "qzp", "zip", "sng"];
+
+  /* =========================================================
+     Skin mapping table: patterns in Quaver skins → osu!mania names
+     {col} is replaced with 1-based column index (or replicated).
+     ========================================================= */
+
+  var SKIN_NAME_PATTERNS = [
+    // Holds (must come before generic note patterns)
+    { pattern: /holdbody|hold_body|hold-body|longnote.*body|ln.*body/i, osu: "mania-hold{col}.png" },
+    { pattern: /holdhead|hold_head|hold-head|ln.*head|longnote.*head/i, osu: "mania-hold{col}H.png" },
+    { pattern: /holdtail|hold_tail|hold-end|holdend|ln.*tail|longnote.*tail/i, osu: "mania-hold{col}L.png" },
+    { pattern: /holdlight|light.*hold/i, osu: "mania-hold{col}L.png" },
+
+    // Receptors / keys
+    { pattern: /receptor|key.*tap|tap.*key|keyswitch|column.*key|key.*base|keybase/i, osu: "mania-key{col}.png" },
+    { pattern: /receptor.*down|key.*down|keydown|key.*pressed/i, osu: "mania-key{col}D.png" },
+
+    // Notes / hit objects
+    { pattern: /hitlight|hit_light|lighting|hitlighting/i, osu: "mania-stage-light.png" },
+    { pattern: /note|hitcircle|tap|circle|spr_hit/i, osu: "mania-note{col}.png" },
+
+    // Judgments
+    { pattern: /judge.*perfect|hit300g|perfect|marvelous/i, osu: "mania-hit300g.png" },
+    { pattern: /judge.*great|hit300/i, osu: "mania-hit300.png" },
+    { pattern: /judge.*good|hit200/i, osu: "mania-hit200.png" },
+    { pattern: /judge.*okay|judge.*ok|hit100/i, osu: "mania-hit100.png" },
+    { pattern: /judge.*bad|hit50/i, osu: "mania-hit50.png" },
+    { pattern: /judge.*miss|hit0|miss/i, osu: "mania-hit0.png" },
+
+    // Stage
+    { pattern: /stage.*light|lighting|hitlight/i, osu: "mania-stage-light.png" },
+    { pattern: /stage.*left|left.*stage|stage_left/i, osu: "mania-stage-left.png" },
+    { pattern: /stage.*right|right.*stage|stage_right/i, osu: "mania-stage-right.png" },
+    { pattern: /stage.*bottom|bottom.*stage|hitposition|stage_bottom/i, osu: "mania-stage-bottom.png" },
+    { pattern: /stage.*hint|hint/i, osu: "mania-stage-hint.png" }
+  ];
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -855,15 +907,6 @@
      Clone Hero note consolidation (strum handling)
      ========================================================= */
 
-  /**
-   * Group notes that fall within `toleranceMs` of each other, deduplicating
-   * by lane. If a 5-lane strum chord would collide with another note in the
-   * same lane within the window, keep the longer sustain.
-   *
-   * The result is a clean note list where each lane has at most one note
-   * per ~10ms window. Full 5-lane strums are preserved naturally because
-   * 5 distinct lanes survive deduplication.
-   */
   function consolidateChordNotes(notes, toleranceMs) {
     if (!notes || !notes.length) return [];
 
@@ -887,7 +930,6 @@
         var merged = false;
         for (var j = 0; j < group.length; j++) {
           if (group[j].lane === cur.lane) {
-            // Same lane in same window — keep the longer hold / earlier start.
             if (cur.end !== null && group[j].end === null) {
               group[j].end = cur.end;
             } else if (cur.end !== null && group[j].end !== null &&
@@ -1200,14 +1242,9 @@
      Clone Hero .chart parsing
      ========================================================= */
 
-  /**
-   * Parses the text of a .chart file into a structure.
-   * Returns { songInfo, syncTrack, difficulties: { ExpertSingle: [...], ... }, resolution, offset }.
-   */
   function parseChartText(text) {
     var lines = text.split(/\r?\n/);
     var currentSection = null;
-    var currentDiff = null;
 
     var songInfo = {};
     var syncTrack = [];
@@ -1221,14 +1258,12 @@
       var secMatch = line.match(/^\[(\w+)\]$/);
       if (secMatch) {
         currentSection = secMatch[1];
-        currentDiff = null;
         continue;
       }
 
       if (line === "{") continue;
       if (line === "}") {
         currentSection = null;
-        currentDiff = null;
         continue;
       }
 
@@ -1276,7 +1311,6 @@
     };
   }
 
-  /** Builds a tick → milliseconds converter that respects multi-BPM sync tracks. */
   function makeTickToMs(parsed) {
     var syncTrack = parsed.syncTrack;
     var resolution = parsed.resolution;
@@ -1304,10 +1338,6 @@
     };
   }
 
-  /**
-   * Builds a Quaver-style pseudo-map object from parsed Clone Hero data for
-   * a specific difficulty. Defaults to 5K layout and consolidates strums.
-   */
   function buildCloneHeroQuaverData(parsed, difficultyKey, sourceName, replayPlayer) {
     var notesRaw = parsed.difficulties[difficultyKey];
     if (!notesRaw || !notesRaw.length) return null;
@@ -1319,7 +1349,6 @@
 
     for (var i = 0; i < notesRaw.length; i++) {
       var n = notesRaw[i];
-      // Clone Hero lanes 0–4 map to 5K lanes 0–4.
       if (n.lane < 0 || n.lane > 4) continue;
 
       var startMs = Math.max(0, Math.round(tickToMs(n.tick)));
@@ -1337,8 +1366,6 @@
       if (endMs > maxEnd) maxEnd = endMs;
     }
 
-    // Consolidate strums / dedupe chords within 10ms so overlapping
-    // 5-lane strums don't produce flams.
     var consolidated = consolidateChordNotes(
       hitObjects.map(function (o) {
         return {
@@ -1402,7 +1429,7 @@
     } catch (e) {
       return null;
     }
-    if (!data || typeof data !== "object") return null;
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
 
     var playerName = String(data.ReplayPlayerName || "").trim();
     if (!playerName) playerName = "Guest";
@@ -1421,35 +1448,291 @@
   }
 
   /* =========================================================
-     Quaver skin (.qs) handling
+     Quaver skin (.qs) parsing & conversion
      ========================================================= */
 
-  /**
-   * Tries to parse a .qs file. If it contains HitObjects, it's actually a
-   * map and is returned as Quaver data. Otherwise it's treated as a skin
-   * and we just keep the raw text.
-   */
+  /** Walk a YAML tree and collect every string that looks like an image path. */
+  function collectSkinImagePaths(obj, paths, seen) {
+    if (obj == null) return;
+
+    if (typeof obj === "string") {
+      if (/\.(png|jpg|jpeg|bmp|gif|webp)$/i.test(obj.trim())) {
+        var p = obj.trim();
+        if (!seen[p]) { seen[p] = true; paths.push(p); }
+      }
+      return;
+    }
+
+    if (Array.isArray(obj)) {
+      for (var i = 0; i < obj.length; i++) collectSkinImagePaths(obj[i], paths, seen);
+      return;
+    }
+
+    if (typeof obj === "object") {
+      for (var k in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, k)) {
+          collectSkinImagePaths(obj[k], paths, seen);
+        }
+      }
+    }
+  }
+
+  /** Walk the YAML tree while tracking the key path for context. */
+  function classifySkinImages(obj, results, parentKey) {
+    if (obj == null) return;
+
+    if (typeof obj === "string") {
+      if (/\.(png|jpg|jpeg|bmp|gif|webp)$/i.test(obj.trim())) {
+        var path = obj.trim();
+        var match = null;
+        var contextStr = (path + " " + (parentKey || "")).toLowerCase();
+        for (var i = 0; i < SKIN_NAME_PATTERNS.length; i++) {
+          if (SKIN_NAME_PATTERNS[i].pattern.test(contextStr)) {
+            match = SKIN_NAME_PATTERNS[i].osu;
+            break;
+          }
+        }
+        if (match) {
+          results.push({ path: path, osuPattern: match, context: parentKey || "" });
+        }
+      }
+      return;
+    }
+
+    if (Array.isArray(obj)) {
+      for (var i = 0; i < obj.length; i++) {
+        classifySkinImages(obj[i], results, parentKey);
+      }
+      return;
+    }
+
+    if (typeof obj === "object") {
+      for (var k in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, k)) {
+          classifySkinImages(obj[k], results, k);
+        }
+      }
+    }
+  }
+
+  /** Extract a column index from a filename if present. Returns -1 if not found. */
+  function extractColumnFromName(filename) {
+    var base = String(filename).replace(/\.(png|jpg|jpeg|bmp|gif|webp)$/i, "");
+
+    // _N, -N, or space+N at the very end
+    var m = base.match(/[_\-\s](\d+)$/);
+    if (m) return parseInt(m[1], 10);
+
+    // Digits at the very end
+    m = base.match(/(\d+)$/);
+    if (m) return parseInt(m[1], 10);
+
+    // Digits at the very start followed by a separator
+    m = base.match(/^(\d+)[_\-\s]/);
+    if (m) return parseInt(m[1], 10);
+
+    return -1;
+  }
+
+  /** Parse a .qs file into either a map (has HitObjects) or a skin. */
   function parseQsFile(text) {
-    if (typeof jsyaml === "undefined") return { type: "unknown" };
+    if (typeof jsyaml === "undefined") return { type: "unknown", error: "YAML parser missing" };
 
     var data;
     try {
       data = jsyaml.load(text);
     } catch (e) {
-      return { type: "unknown" };
+      return { type: "unknown", error: "YAML parse error: " + (e && e.message ? e.message : e) };
     }
-    if (!data || typeof data !== "object") return { type: "unknown" };
 
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return { type: "unknown", error: "Not a valid Quaver skin or map file" };
+    }
+
+    // If it has HitObjects with content, it's actually a map
     if (Array.isArray(data.HitObjects) && data.HitObjects.length > 0) {
       return { type: "map", data: data };
     }
 
+    // Otherwise treat as a skin
+    var imagePaths = [];
+    var seenPaths = {};
+    collectSkinImagePaths(data, imagePaths, seenPaths);
+
+    var classified = [];
+    classifySkinImages(data, classified, "");
+
     return {
       type: "skin",
-      name: data.Name || data.SkinName || "Unknown Skin",
-      author: data.Author || data.SkinAuthor || "",
+      name: String(data.Name || data.SkinName || "Unknown Skin").trim(),
+      author: String(data.Author || data.SkinAuthor || "").trim(),
+      version: String(data.Version || "").trim(),
+      imagePaths: imagePaths,
+      classified: classified,
       raw: data
     };
+  }
+
+  /** Find the actual File in the drop that matches a skin image path. */
+  function findSkinImageFile(imagePath, sidecarIndex) {
+    if (!imagePath || !sidecarIndex) return null;
+
+    var norm = String(imagePath).replace(/\\/g, "/").toLowerCase();
+
+    if (sidecarIndex.byFullPath[norm]) return sidecarIndex.byFullPath[norm];
+
+    var base = norm.split("/").pop();
+    if (sidecarIndex.byBasename[base]) return sidecarIndex.byBasename[base];
+
+    return null;
+  }
+
+  /**
+   * Package matched skin images into a ZIP using osu!mania filenames.
+   * `keyCount` controls replication of column-agnostic images.
+   * Returns { matched, missing, filled } — filled is the list of names written.
+   */
+  function packageSkinImages(zip, skinInfo, sidecarIndex, keyCount) {
+    var matched = 0;
+    var missing = 0;
+    var filled = {};
+
+    if (!skinInfo || !skinInfo.classified) {
+      return { matched: 0, missing: 0, filled: filled };
+    }
+
+    // First pass: column-specific images take priority
+    var columnSpecific = [];
+    var generic = [];
+
+    for (var i = 0; i < skinInfo.classified.length; i++) {
+      var item = skinInfo.classified[i];
+      var col = extractColumnFromName(item.path);
+      if (col >= 0) columnSpecific.push({ item: item, col: col });
+      else generic.push(item);
+    }
+
+    // Apply column-specific images
+    for (var i = 0; i < columnSpecific.length; i++) {
+      var entry = columnSpecific[i];
+      if (entry.col >= keyCount) continue;  // Out of range for this map
+
+      var file = findSkinImageFile(entry.item.path, sidecarIndex);
+      if (!file) { missing++; continue; }
+
+      var osuName = entry.item.osuPattern;
+      if (osuName.indexOf("{col}") !== -1) {
+        osuName = osuName.replace("{col}", String(entry.col + 1));
+      }
+
+      if (filled[osuName]) continue;
+      filled[osuName] = true;
+      zip.file(osuName, file);
+      matched++;
+    }
+
+    // Apply generic images (replicate across all columns if needed)
+    for (var i = 0; i < generic.length; i++) {
+      var item = generic[i];
+      var file = findSkinImageFile(item.path, sidecarIndex);
+      if (!file) { missing++; continue; }
+
+      var osuPattern = item.osuPattern;
+
+      if (osuPattern.indexOf("{col}") !== -1) {
+        for (var c = 1; c <= keyCount; c++) {
+          var name = osuPattern.replace("{col}", String(c));
+          if (filled[name]) continue;
+          filled[name] = true;
+          zip.file(name, file);
+          matched++;
+        }
+      } else {
+        if (filled[osuPattern]) continue;
+        filled[osuPattern] = true;
+        zip.file(osuPattern, file);
+        matched++;
+      }
+    }
+
+    return { matched: matched, missing: missing, filled: filled };
+  }
+
+  /** Build a standalone .osk skin file from a Quaver skin. */
+  function buildOskFromSkin(skinInfo, sidecarIndex, skinKeyCount) {
+    if (typeof JSZip === "undefined") {
+      return Promise.reject(new Error("JSZip not loaded."));
+    }
+
+    // If key count wasn't specified, detect from column-annotated filenames
+    var detectedKeys = skinKeyCount || 0;
+    if (!detectedKeys) {
+      var maxCol = -1;
+      for (var i = 0; i < skinInfo.classified.length; i++) {
+        var c = extractColumnFromName(skinInfo.classified[i].path);
+        if (c > maxCol) maxCol = c;
+      }
+      detectedKeys = maxCol >= 0 ? maxCol + 1 : 4;
+      if (detectedKeys < 4) detectedKeys = 4;
+      if (detectedKeys > 10) detectedKeys = 10;
+    }
+
+    var zip = new JSZip();
+    var result = packageSkinImages(zip, skinInfo, sidecarIndex, detectedKeys);
+
+    if (result.matched === 0) {
+      return Promise.reject(new Error(
+        "No skin images could be matched to osu!mania filenames. " +
+        "Drop the .qs file together with its PNG sprites."
+      ));
+    }
+
+    // Build skin.ini
+    var colourList = [];
+    for (var c = 1; c <= detectedKeys; c++) {
+      colourList.push("Colour" + c + ": 255,255,255");
+    }
+    var lightList = [];
+    for (var c = 1; c <= detectedKeys; c++) {
+      lightList.push("ColourLight" + c + ": 255,255,255");
+    }
+    var widths = [];
+    for (var c = 1; c <= detectedKeys; c++) widths.push("64");
+
+    var skinIniLines = [
+      "[General]",
+      "Name: " + (skinInfo.name || "Quaver Skin"),
+      "Author: " + (skinInfo.author || "Unknown"),
+      "Version: 2.5",
+      "",
+      "[Mania]",
+      "Keys: " + detectedKeys,
+      "ColumnStart: 136",
+      "ColumnWidth: " + widths.join(","),
+      "ColumnLineWidth: " + widths.map(function () { return "2"; }).join(","),
+      "HitPosition: 400",
+      "LightPosition: 413",
+      "ScorePosition: 198",
+      "ComboPosition: 215"
+    ].concat(colourList).concat(lightList).concat([
+      "ColourColumnLine: 255,255,255",
+      "ColourBreak: 255,255,255"
+    ]).join("\n");
+
+    zip.file("skin.ini", skinIniLines);
+
+    return zip.generateAsync({
+      type: "blob",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 }
+    }).then(function (blob) {
+      return {
+        blob: blob,
+        matched: result.matched,
+        missing: result.missing,
+        keyCount: detectedKeys
+      };
+    });
   }
 
   /* =========================================================
@@ -1919,6 +2202,7 @@
      ========================================================= */
 
   var maps = [];
+  var skins = [];  // { id, name, author, skinInfo, sidecarIndex, sourcePath, fileCount, error }
   var uid = 0;
 
   var dropzoneEl   = document.getElementById("dropzone");
@@ -1966,7 +2250,7 @@
       maps[i].converted = false;
       maps[i].error = null;
     }
-    if (maps.length) render();
+    if (maps.length || skins.length) render();
   }
 
   function applySpeed(value, fromNumberInput) {
@@ -2298,7 +2582,7 @@
                   path: f.__relPath || f.webkitRelativePath || f.name,
                   data: parsed.data
                 });
-              } else {
+              } else if (parsed.type === "skin") {
                 skinSources.push({
                   name: f.name,
                   path: f.__relPath || f.webkitRelativePath || f.name,
@@ -2306,6 +2590,7 @@
                   parsed: parsed
                 });
               }
+              // Unknown .qs files are silently ignored
             }, function (err) {
               packErrors.push(f.name + ": " + (err && err.message ? err.message : err));
             });
@@ -2331,11 +2616,11 @@
               var chartEntry = null;
               var innerChain = Promise.resolve();
 
-              // First find any chart files.
+              // Prefer the canonical chart entry.
               for (var k = 0; k < entryNames.length; k++) {
                 var e = zip.files[entryNames[k]];
                 if (e.dir) continue;
-                if (/\.chart$/i.test(e.name)) {
+                if (/notes\.chart$/i.test(e.name) || /\.chart$/i.test(e.name)) {
                   chartEntry = e;
                   break;
                 }
@@ -2399,7 +2684,7 @@
                             path: entry.name,
                             data: parsed.data
                           });
-                        } else {
+                        } else if (parsed.type === "skin") {
                           skinSources.push({
                             name: entry.name.split("/").pop(),
                             path: entry.name,
@@ -2478,17 +2763,42 @@
 
   function guessAudio(index) {
     var keys = Object.keys(index.byBasename);
+
+    // Prefer well-named song/audio files
+    for (var i = 0; i < keys.length; i++) {
+      if (/^(song|audio|music)\.(mp3|ogg|wav|m4a|flac)$/i.test(keys[i])) {
+        return index.byBasename[keys[i]];
+      }
+    }
+
+    // Prefer mp3
+    for (var i = 0; i < keys.length; i++) {
+      if (/\.mp3$/i.test(keys[i])) return index.byBasename[keys[i]];
+    }
+
+    // Any audio
     for (var i = 0; i < keys.length; i++) {
       if (isAudio(keys[i])) return index.byBasename[keys[i]];
     }
+
     return null;
   }
 
   function guessBackground(index) {
     var keys = Object.keys(index.byBasename);
+
+    // Prefer well-named bg files
+    for (var i = 0; i < keys.length; i++) {
+      if (/^(bg|background|back|album|cover)\.(png|jpg|jpeg|gif|bmp|webp)$/i.test(keys[i])) {
+        return index.byBasename[keys[i]];
+      }
+    }
+
+    // Any image
     for (var i = 0; i < keys.length; i++) {
       if (isImage(keys[i])) return index.byBasename[keys[i]];
     }
+
     return null;
   }
 
@@ -2513,7 +2823,6 @@
 
     var notes = extractNotes(data, keyCount);
 
-    // Consolidate chords (handles Clone Hero strums / duplicates within 10ms).
     if (extras.consolidate !== false) {
       notes = consolidateChordNotes(notes, CH_CONSOLIDATE_MS);
     }
@@ -2542,7 +2851,8 @@
     var bgFile = findSidecar(sidecarIndex, data.BackgroundFile) || guessBackground(sidecarIndex);
 
     var replayPlayerName = extras.replayPlayerName || null;
-    var skinFiles = extras.skinFiles || [];
+    var skinInfo = extras.skinInfo || null;
+    var skinSidecarIndex = extras.skinSidecarIndex || null;
 
     var meta = {
       title: data.Title || "Untitled",
@@ -2568,7 +2878,8 @@
       hasBg: !!bgFile,
       laneOffset: laneOffset,
       replayPlayerName: replayPlayerName,
-      chartSourceType: extras.chartSourceType || null
+      chartSourceType: extras.chartSourceType || null,
+      hasSkin: !!skinInfo
     };
 
     return {
@@ -2584,7 +2895,8 @@
       bpmInfo: bpmInfo,
       audioFile: audioFile,
       bgFile: bgFile,
-      skinFiles: skinFiles,
+      skinInfo: skinInfo,
+      skinSidecarIndex: skinSidecarIndex,
       osuText: null,
       oszBlob: null,
       oszRate: null,
@@ -2600,14 +2912,14 @@
     }
 
     var data = jsyaml.load(source.text);
-    if (!data || typeof data !== "object") {
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
       throw new Error("File does not look like a Quaver map (empty or invalid YAML).");
     }
 
     return buildMapRecord(data, source.name, source.path, sidecarIndex, extras || {});
   }
 
-  function buildCloneHeroMaps(chartSource, sidecarIndex, replayPlayerName, skinFiles) {
+  function buildCloneHeroMaps(chartSource, sidecarIndex, replayPlayerName, skinInfo, skinSidecarIndex) {
     var parsed = parseChartText(chartSource.text);
     var mapsOut = [];
 
@@ -2628,7 +2940,8 @@
           {
             defaultKeyCount: CH_KEY_COUNT,
             replayPlayerName: replayPlayerName,
-            skinFiles: skinFiles,
+            skinInfo: skinInfo,
+            skinSidecarIndex: skinSidecarIndex,
             chartSourceType: "clonehero"
           }
         );
@@ -2671,14 +2984,10 @@
       if (audio) zip.file(audio.name, audio.blob);
       if (map.bgFile) zip.file(map.bgFile.name, map.bgFile);
 
-      // Bundle any Quaver skin files alongside the map (bundled as-is).
-      if (map.skinFiles && map.skinFiles.length) {
-        for (var i = 0; i < map.skinFiles.length; i++) {
-          var skin = map.skinFiles[i];
-          try {
-            zip.file("skin_" + skin.name, skin.text);
-          } catch (e) {}
-        }
+      // Bundle skin sprites converted to osu!mania names
+      if (map.skinInfo && map.skinSidecarIndex) {
+        var keys = map.meta.keyCount || 4;
+        packageSkinImages(zip, map.skinInfo, map.skinSidecarIndex, keys);
       }
 
       return zip.generateAsync({
@@ -2708,8 +3017,14 @@
     ) + ".osz";
   }
 
+  function oskFilename(skin) {
+    return sanitizeFilename(
+      (skin.name || "Quaver Skin") + " (from Quaver)"
+    ) + ".osk";
+  }
+
   /* =========================================================
-     Rendering
+     Rendering — map cards
      ========================================================= */
 
   function keyBadgeClass(keys) {
@@ -2780,6 +3095,10 @@
       chips.push('<span class="chip player">👤 ' + esc(m.replayPlayerName) + "</span>");
     }
 
+    if (m.hasSkin) {
+      chips.push('<span class="chip skin-chip">🎨 ' + esc(map.skinInfo.name) + "</span>");
+    }
+
     var byline = "charted by " + esc(m.creator);
     if (m.source) byline += " · from " + esc(m.source);
 
@@ -2823,6 +3142,11 @@
         "</div>"
       : "";
 
+    var skinHtml = m.hasSkin
+      ? '<div class="card-note skin-note">🎨 Skin sprites from <strong>' +
+        esc(map.skinInfo.name) + "</strong> will be bundled into the .osz with osu!mania names.</div>"
+      : "";
+
     var noteHtml = map.converted
       ? '<div class="card-note ok">✓ Packaged as .osz — includes ' +
         (map.audioFile
@@ -2832,7 +3156,8 @@
               : "audio")
           : "<em>no audio</em>") + ", " +
         (map.bgFile ? "background" : "<em>no background</em>") +
-        ", BPM changes, SV changes, and metadata." +
+        ", BPM changes, SV changes, metadata" +
+        (m.hasSkin ? ", and skin sprites" : "") + "." +
         (m.laneOffset > 0 ? " Lane numbering was 1-indexed; shifted down by 1." : "") +
         "</div>"
       : '<div class="card-note">Source: <code>' + esc(map.filePath || map.fileName) + "</code>" +
@@ -2844,7 +3169,7 @@
     if (map.error)     cardClasses += " errored";
 
     return (
-      '<article class="' + cardClasses + '" data-id="' + map.id + '">' +
+      '<article class="' + cardClasses + '" data-id="' + map.id + '" data-kind="map">' +
         '<div class="card-head">' +
           '<div class="keys-badge ' + keyBadgeClass(m.keyCount) + '">' + m.keyCount + "K</div>" +
           '<div class="info">' +
@@ -2868,14 +3193,97 @@
           bpmNoteHtml +
           svNoteHtml +
           speedHtml +
+          skinHtml +
           noteHtml +
         "</div>" +
       "</article>"
     );
   }
 
+  /* =========================================================
+     Rendering — skin cards
+     ========================================================= */
+
+  function renderSkinCard(skin) {
+    var info = skin.skinInfo || {};
+    var name = info.name || "Unknown Skin";
+    var author = info.author || "Unknown";
+    var classified = info.classified || [];
+    var totalPaths = (info.imagePaths || []).length;
+
+    var matchedCount = 0;
+    var missingCount = 0;
+    for (var i = 0; i < classified.length; i++) {
+      if (findSkinImageFile(classified[i].path, skin.sidecarIndex)) matchedCount++;
+      else missingCount++;
+    }
+
+    var chips = [
+      '<span class="chip diff">Skin</span>',
+      '<span class="chip">' + totalPaths + " sprite" + (totalPaths === 1 ? "" : "s") + "</span>"
+    ];
+    if (matchedCount > 0) {
+      chips.push('<span class="chip has">✓ ' + matchedCount + " matched</span>");
+    }
+    if (missingCount > 0) {
+      chips.push('<span class="chip miss">' + missingCount + " missing</span>");
+    }
+
+    var errHtml = skin.error
+      ? '<div class="card-note err">⚠ ' + esc(skin.error) + "</div>"
+      : "";
+
+    var noteHtml = skin.downloaded
+      ? '<div class="card-note ok">✓ Downloaded as .osk — ' + matchedCount +
+        " sprite" + (matchedCount === 1 ? "" : "s") + " packaged.</div>"
+      : '<div class="card-note">Source: <code>' + esc(skin.sourcePath || skin.fileName) +
+        "</code></div>";
+
+    var skinHintHtml = "";
+    if (missingCount > 0 && matchedCount === 0) {
+      skinHintHtml = '<div class="card-note skin-note">' +
+        "🎨 No sprites matched. Drop the .qs file <em>together with</em> its image files " +
+        "(select the whole skin folder) so the images can be found.</div>";
+    } else if (missingCount > 0) {
+      skinHintHtml = '<div class="card-note skin-note">' +
+        "🎨 " + missingCount + " sprite" + (missingCount === 1 ? "" : "s") +
+        " could not be found in the drop. Only matched sprites will be bundled.</div>";
+    }
+
+    var cardClasses = "card skin-card";
+    if (skin.error) cardClasses += " errored";
+
+    return (
+      '<article class="' + cardClasses + '" data-id="' + skin.id + '" data-kind="skin">' +
+        '<div class="card-head">' +
+          '<div class="keys-badge sk">🎨</div>' +
+          '<div class="info">' +
+            "<h3>" + esc(name) + "</h3>" +
+            '<p class="artist">by ' + esc(author) + "</p>" +
+            '<p class="byline">Quaver skin · converted to osu!mania format</p>' +
+            '<div class="chips">' + chips.join("") + "</div>" +
+          "</div>" +
+        "</div>" +
+        '<div class="card-actions">' +
+          '<button class="btn skin" data-action="download-osk" data-id="' + skin.id + '"' +
+            (matchedCount === 0 ? " disabled" : "") + ">⬇ Download as .osk</button>" +
+          '<button class="btn ghost" data-action="remove-skin" data-id="' + skin.id + '">✕</button>' +
+          errHtml +
+          noteHtml +
+          skinHintHtml +
+        "</div>" +
+      "</article>"
+    );
+  }
+
+  /* =========================================================
+     Rendering — main
+     ========================================================= */
+
   function render() {
-    if (!maps.length) {
+    var totalItems = maps.length + skins.length;
+
+    if (!totalItems) {
       mapsEl.innerHTML = "";
       toolbarEl.classList.add("hidden");
       updatePreviewAvailability();
@@ -2883,10 +3291,16 @@
     }
 
     toolbarEl.classList.remove("hidden");
-    mapCountEl.textContent = maps.length + (maps.length === 1 ? " map" : " maps");
+
+    var countText = maps.length + " map" + (maps.length === 1 ? "" : "s");
+    if (skins.length > 0) {
+      countText += " · " + skins.length + " skin" + (skins.length === 1 ? "" : "s");
+    }
+    mapCountEl.textContent = countText;
 
     var html = "";
     for (var i = 0; i < maps.length; i++) html += renderCard(maps[i]);
+    for (var i = 0; i < skins.length; i++) html += renderSkinCard(skins[i]);
     mapsEl.innerHTML = html;
 
     var remaining = maps.filter(function (m) { return !m.converted && !m.error; }).length;
@@ -2944,7 +3358,7 @@
       var allSidecars = files.concat(result.extracted || []);
       var sidecarIndex = buildSidecarIndex(allSidecars);
 
-      // Parse replay files first so we can associate player names.
+      // Parse replays
       var replays = [];
       for (var i = 0; i < result.replays.length; i++) {
         var replay = parseQuaverReplay(result.replays[i].text);
@@ -2956,8 +3370,6 @@
 
       function replayForMap(mapData) {
         if (!replays.length) return null;
-
-        // Prefer exact MapId match.
         if (mapData && mapData.MapId) {
           for (var r = 0; r < replays.length; r++) {
             if (replays[r].mapId && replays[r].mapId === mapData.MapId) {
@@ -2965,8 +3377,6 @@
             }
           }
         }
-
-        // Fall back to the first replay.
         return replays[0].playerName;
       }
 
@@ -2975,13 +3385,37 @@
       var rejected = [];
       var autoDetected = 0;
       var svGimmick = 0;
-      var cloneHeroCount = 0;
+      var skinsAdded = 0;
 
-      var skinFilesForMaps = result.skins.map(function (s) {
-        return { name: s.name, text: s.text };
-      });
+      // Register skins from this drop
+      var skinsInDrop = [];
+      for (var i = 0; i < result.skins.length; i++) {
+        var s = result.skins[i];
+        var dupSkin = skins.some(function (existing) {
+          return existing.sourcePath === s.path &&
+                 existing.skinInfo.name === s.parsed.name;
+        });
+        if (dupSkin) continue;
 
-      // 1. Quaver .qua sources
+        var skinRecord = {
+          id: "s" + (++uid),
+          fileName: s.name,
+          sourcePath: s.path,
+          skinInfo: s.parsed,
+          sidecarIndex: sidecarIndex,
+          downloaded: false,
+          error: null
+        };
+        skins.push(skinRecord);
+        skinsInDrop.push(skinRecord);
+        skinsAdded++;
+      }
+
+      // Use the first skin for this drop when building maps
+      var dropSkinInfo = skinsInDrop.length > 0 ? skinsInDrop[0].skinInfo : null;
+      var dropSkinSidecarIndex = skinsInDrop.length > 0 ? skinsInDrop[0].sidecarIndex : null;
+
+      // Process .qua sources
       for (var i = 0; i < result.qua.length; i++) {
         var src = result.qua[i];
         try {
@@ -2994,7 +3428,8 @@
 
           var map = parseQuaSource(src, sidecarIndex, {
             replayPlayerName: playerName,
-            skinFiles: skinFilesForMaps
+            skinInfo: dropSkinInfo,
+            skinSidecarIndex: dropSkinSidecarIndex
           });
 
           if (map.meta.noteCount === 0) {
@@ -3023,12 +3458,15 @@
         }
       }
 
-      // 2. Clone Hero .chart / .sng sources
+      // Process Clone Hero .chart sources
       for (var i = 0; i < result.chart.length; i++) {
         var chartSrc = result.chart[i];
         try {
           var playerName = replays.length ? replays[0].playerName : null;
-          var chMaps = buildCloneHeroMaps(chartSrc, sidecarIndex, playerName, skinFilesForMaps);
+          var chMaps = buildCloneHeroMaps(
+            chartSrc, sidecarIndex, playerName,
+            dropSkinInfo, dropSkinSidecarIndex
+          );
           if (!chMaps.length) {
             failed.push(chartSrc.name + ": no convertible difficulties");
             continue;
@@ -3043,7 +3481,6 @@
             if (dup2) continue;
             maps.push(cm);
             added++;
-            cloneHeroCount++;
           }
         } catch (err) {
           failed.push(chartSrc.name + ": " +
@@ -3051,7 +3488,7 @@
         }
       }
 
-      // 3. Quaver .qs that actually contain map data
+      // Process .qs files that are actually maps
       for (var i = 0; i < result.qsMaps.length; i++) {
         var qsSrc = result.qsMaps[i];
         try {
@@ -3061,7 +3498,11 @@
             qsSrc.name,
             qsSrc.path,
             sidecarIndex,
-            { replayPlayerName: playerName, skinFiles: skinFilesForMaps }
+            {
+              replayPlayerName: playerName,
+              skinInfo: dropSkinInfo,
+              skinSidecarIndex: dropSkinSidecarIndex
+            }
           );
           if (qMap.meta.noteCount === 0) {
             failed.push(qsSrc.name + ": no hit objects");
@@ -3085,7 +3526,11 @@
 
       render();
 
-      var statusMsg = "Loaded " + added + " map" + (added === 1 ? "" : "s") + ".";
+      var statusParts = [];
+      if (added > 0) statusParts.push("Loaded " + added + " map" + (added === 1 ? "" : "s"));
+      if (skinsAdded > 0) statusParts.push("+" + skinsAdded + " skin" + (skinsAdded === 1 ? "" : "s"));
+      var statusMsg = statusParts.length ? statusParts.join(" ") + "." : "No new maps or skins loaded.";
+
       if (autoDetected > 0) {
         statusMsg += " " + autoDetected + " BPM value" + (autoDetected === 1 ? " was" : "s were") +
                      " auto-detected.";
@@ -3101,7 +3546,7 @@
       if (result.errors.length) statusMsg += " Pack errors: " + result.errors.join("; ");
       if (failed.length) statusMsg += " Skipped: " + failed.join("; ");
 
-      setStatus(statusMsg, added ? "ok" : "err");
+      setStatus(statusMsg, (added || skinsAdded) ? "ok" : "err");
     });
   }
 
@@ -3125,7 +3570,8 @@
           : "") + "." +
         (map.laneOffset > 0 ? " (1-indexed lanes shifted down by 1)" : "") +
         (map.meta.svHasReverse ? " Reverse SV preserved." : "") +
-        (map.meta.svHasTeleport ? " Teleport SV preserved (may be clamped)." : ""),
+        (map.meta.svHasTeleport ? " Teleport SV preserved (may be clamped)." : "") +
+        (map.meta.hasSkin ? " Skin bundled." : ""),
         "ok"
       );
     }, function (err) {
@@ -3172,6 +3618,28 @@
       var msg = "Converted " + ok + " map" + (ok === 1 ? "" : "s") + " to .osz.";
       if (fail) msg += " " + fail + " failed.";
       setStatus(msg, ok ? "ok" : "err");
+    });
+  }
+
+  function downloadSkinAsOsk(skin) {
+    setBusy(true, "Packaging .osk…");
+    return buildOskFromSkin(skin.skinInfo, skin.sidecarIndex, null).then(function (result) {
+      downloadBlob(result.blob, oskFilename(skin));
+      skin.downloaded = true;
+      skin.error = null;
+      render();
+      setStatus(
+        "Packaged “" + (skin.skinInfo.name || "Skin") + "” as .osk — " +
+        result.matched + " sprite" + (result.matched === 1 ? "" : "s") +
+        " (" + result.keyCount + "K).",
+        "ok"
+      );
+    }, function (err) {
+      skin.error = err && err.message ? err.message : String(err);
+      render();
+      setStatus("Skin packaging failed: " + skin.error, "err");
+    }).then(function () {
+      setBusy(false);
     });
   }
 
@@ -3260,6 +3728,26 @@
 
     var id = btn.dataset.id;
     var action = btn.dataset.action;
+    var kind = btn.closest("article").dataset.kind;
+
+    if (kind === "skin") {
+      var skin = null;
+      for (var i = 0; i < skins.length; i++) {
+        if (skins[i].id === id) { skin = skins[i]; break; }
+      }
+      if (!skin) return;
+
+      if (action === "download-osk") {
+        return downloadSkinAsOsk(skin);
+      }
+      if (action === "remove-skin") {
+        skins = skins.filter(function (s) { return s.id !== id; });
+        render();
+        return;
+      }
+      return;
+    }
+
     var map = null;
     for (var i = 0; i < maps.length; i++) {
       if (maps[i].id === id) { map = maps[i]; break; }
@@ -3298,6 +3786,7 @@
 
   clearAllEl.addEventListener("click", function () {
     maps = [];
+    skins = [];
     disposePreview();
     render();
     setStatus("");
