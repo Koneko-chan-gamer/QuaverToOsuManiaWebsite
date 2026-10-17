@@ -428,6 +428,12 @@
     border-color: rgba(255,158,107,.55);
     background: rgba(255,158,107,.12);
   }
+  .chip.player {
+    color: #d4c4ff;
+    border-color: rgba(212,196,255,.35);
+    background: rgba(212,196,255,.07);
+    font-weight: 500;
+  }
 
   .card-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
   .card-note {
@@ -512,7 +518,7 @@
       <button class="btn ghost" id="pickFolder" type="button">📁 Choose folder</button>
     </div>
     <input type="file" id="fileInput" multiple
-           accept=".qua,.qp,.qzp,.zip,.mp3,.ogg,.wav,.m4a,.flac,.png,.jpg,.jpeg,.gif,.bmp,.webp" hidden>
+           accept=".qua,.qp,.qzp,.zip,.qr,.chart,.mid,.sng,.qs,.mp3,.ogg,.wav,.m4a,.flac,.png,.jpg,.jpeg,.gif,.bmp,.webp" hidden>
     <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
   </section>
 
@@ -564,7 +570,7 @@
     <br>
     <strong>Key range:</strong> 1K through 10K (including full 10-key support). Maps above 10K are rejected.
     <br>
-    <strong>BPM:</strong> read from Quaver timing points first, then the top-level <code>BPM</code> field,
+    <strong>BPM:</strong> read from timing points first, then the top-level <code>BPM</code> field,
     then auto-detected from note spacing using dominant-interval analysis + grid alignment scoring.
     <br>
     <strong>SV:</strong> negative multipliers (reverse scroll) and extreme values (teleport/freeze)
@@ -604,6 +610,8 @@
   var PLAYFIELD_W = 512;
   var MIN_KEYS = 1;
   var MAX_KEYS = 10;
+  var CH_KEY_COUNT = 5;
+  var CH_CONSOLIDATE_MS = 10;
 
   var MIN_RATE = 0.5;
   var MAX_RATE = 2;
@@ -616,6 +624,7 @@
 
   var AUDIO_EXTS = ["mp3", "ogg", "wav", "m4a", "flac"];
   var IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
+  var ARCHIVE_EXTS = ["qp", "qzp", "zip", "sng"];
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -691,6 +700,7 @@
 
   function isAudio(name) { return AUDIO_EXTS.indexOf(getExt(name)) !== -1; }
   function isImage(name) { return IMAGE_EXTS.indexOf(getExt(name)) !== -1; }
+  function isArchive(name) { return ARCHIVE_EXTS.indexOf(getExt(name)) !== -1; }
 
   /* =========================================================
      Speed / pitch state
@@ -729,7 +739,7 @@
   }
 
   /* =========================================================
-     Busy overlay with reference counting
+     Busy overlay
      ========================================================= */
 
   var busyCount = 0;
@@ -751,7 +761,7 @@
   }
 
   /* =========================================================
-     Quaver parsing
+     Quaver key count / notes
      ========================================================= */
 
   function deriveKeyCount(data) {
@@ -842,7 +852,65 @@
   }
 
   /* =========================================================
-     BPM detection
+     Clone Hero note consolidation (strum handling)
+     ========================================================= */
+
+  /**
+   * Group notes that fall within `toleranceMs` of each other, deduplicating
+   * by lane. If a 5-lane strum chord would collide with another note in the
+   * same lane within the window, keep the longer sustain.
+   *
+   * The result is a clean note list where each lane has at most one note
+   * per ~10ms window. Full 5-lane strums are preserved naturally because
+   * 5 distinct lanes survive deduplication.
+   */
+  function consolidateChordNotes(notes, toleranceMs) {
+    if (!notes || !notes.length) return [];
+
+    var sorted = notes.slice().sort(function (a, b) {
+      return a.start - b.start || a.lane - b.lane;
+    });
+
+    var result = [];
+    var group = [sorted[0]];
+
+    function flushGroup() {
+      for (var i = 0; i < group.length; i++) result.push(group[i]);
+      group = [];
+    }
+
+    for (var i = 1; i < sorted.length; i++) {
+      var cur = sorted[i];
+      var groupStart = group[0].start;
+
+      if (cur.start - groupStart <= toleranceMs) {
+        var merged = false;
+        for (var j = 0; j < group.length; j++) {
+          if (group[j].lane === cur.lane) {
+            // Same lane in same window — keep the longer hold / earlier start.
+            if (cur.end !== null && group[j].end === null) {
+              group[j].end = cur.end;
+            } else if (cur.end !== null && group[j].end !== null &&
+                       cur.end > group[j].end) {
+              group[j].end = cur.end;
+            }
+            merged = true;
+            break;
+          }
+        }
+        if (!merged) group.push(cur);
+      } else {
+        flushGroup();
+        group.push(cur);
+      }
+    }
+
+    if (group.length) flushGroup();
+    return result;
+  }
+
+  /* =========================================================
+     BPM detection (Quaver)
      ========================================================= */
 
   function parseTimingPoints(data) {
@@ -1059,7 +1127,7 @@
   }
 
   /* =========================================================
-     SV parsing (now with negative / extreme support)
+     SV parsing
      ========================================================= */
 
   function parseSvPoints(data) {
@@ -1072,21 +1140,11 @@
       var t = Number(sv.StartTime);
       var mult = Number(sv.Multiplier);
       if (!isFinite(t) || !isFinite(mult)) continue;
-      // Allow negative multipliers (reverse scroll) and zero (freeze).
-      // Only reject NaN/Infinity.
       svs.push({ time: t, multiplier: mult });
     }
 
     svs.sort(function (a, b) { return a.time - b.time; });
     return svs;
-  }
-
-  /** Classify an SV point for UI purposes. */
-  function classifySv(mult) {
-    if (mult < 0) return "reverse";
-    if (mult === 0) return "freeze";
-    if (mult >= 5) return "teleport";
-    return "normal";
   }
 
   function summarizeSv(svs) {
@@ -1105,7 +1163,7 @@
   }
 
   /* =========================================================
-     KPS (keys / notes per second)
+     KPS
      ========================================================= */
 
   function computeKps(notes, rate) {
@@ -1136,6 +1194,262 @@
   function fmtKpsAvg(v) {
     if (!isFinite(v) || v <= 0) return "0.00";
     return v.toFixed(2);
+  }
+
+  /* =========================================================
+     Clone Hero .chart parsing
+     ========================================================= */
+
+  /**
+   * Parses the text of a .chart file into a structure.
+   * Returns { songInfo, syncTrack, difficulties: { ExpertSingle: [...], ... }, resolution, offset }.
+   */
+  function parseChartText(text) {
+    var lines = text.split(/\r?\n/);
+    var currentSection = null;
+    var currentDiff = null;
+
+    var songInfo = {};
+    var syncTrack = [];
+    var difficulties = {};
+    var noteSectionRe = /^(Expert|Hard|Medium|Easy)(Single|DoubleGuitar|DoubleBass|DoubleRhythm|Drums|Keyboard)$/;
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (!line) continue;
+
+      var secMatch = line.match(/^\[(\w+)\]$/);
+      if (secMatch) {
+        currentSection = secMatch[1];
+        currentDiff = null;
+        continue;
+      }
+
+      if (line === "{") continue;
+      if (line === "}") {
+        currentSection = null;
+        currentDiff = null;
+        continue;
+      }
+
+      var eqIdx = line.indexOf("=");
+      if (eqIdx < 0) continue;
+      var key = line.substring(0, eqIdx).trim();
+      var value = line.substring(eqIdx + 1).trim();
+
+      if (currentSection === "Song") {
+        var strMatch = value.match(/^"(.*)"$/);
+        songInfo[key] = strMatch ? strMatch[1] : value;
+      } else if (currentSection === "SyncTrack") {
+        var tick = parseInt(key, 10);
+        if (!isFinite(tick)) continue;
+        var parts = value.split(/\s+/);
+        if (parts[0] === "B" && parts[1]) {
+          syncTrack.push({ tick: tick, bpm: parseInt(parts[1], 10) / 1000 });
+        }
+      } else if (currentSection && noteSectionRe.test(currentSection)) {
+        var tick = parseInt(key, 10);
+        if (!isFinite(tick)) continue;
+        var parts = value.split(/\s+/);
+
+        if (parts[0] === "N" && parts[1] !== undefined) {
+          var lane = parseInt(parts[1], 10);
+          var sustain = parseInt(parts[2], 10) || 0;
+          if (!difficulties[currentSection]) difficulties[currentSection] = [];
+          difficulties[currentSection].push({ tick: tick, lane: lane, sustain: sustain });
+        }
+      }
+    }
+
+    syncTrack.sort(function (a, b) { return a.tick - b.tick; });
+    if (!syncTrack.length) syncTrack = [{ tick: 0, bpm: 120 }];
+
+    var resolution = parseInt(songInfo.Resolution, 10) || 192;
+    var offset = parseFloat(songInfo.Offset) || 0;
+
+    return {
+      songInfo: songInfo,
+      syncTrack: syncTrack,
+      difficulties: difficulties,
+      resolution: resolution,
+      offset: offset
+    };
+  }
+
+  /** Builds a tick → milliseconds converter that respects multi-BPM sync tracks. */
+  function makeTickToMs(parsed) {
+    var syncTrack = parsed.syncTrack;
+    var resolution = parsed.resolution;
+    var offset = parsed.offset;
+
+    var segments = [];
+    for (var i = 0; i < syncTrack.length; i++) {
+      var st = syncTrack[i];
+      if (i === 0) {
+        segments.push({ tick: st.tick, bpm: st.bpm, startMs: 0 });
+      } else {
+        var prev = segments[segments.length - 1];
+        var prevMs = prev.startMs + ((st.tick - prev.tick) / resolution) * (60000 / prev.bpm);
+        segments.push({ tick: st.tick, bpm: st.bpm, startMs: prevMs });
+      }
+    }
+
+    return function tickToMs(tick) {
+      var seg = segments[0];
+      for (var i = segments.length - 1; i >= 0; i--) {
+        if (segments[i].tick <= tick) { seg = segments[i]; break; }
+      }
+      var segMs = seg.startMs + ((tick - seg.tick) / resolution) * (60000 / seg.bpm);
+      return offset + segMs;
+    };
+  }
+
+  /**
+   * Builds a Quaver-style pseudo-map object from parsed Clone Hero data for
+   * a specific difficulty. Defaults to 5K layout and consolidates strums.
+   */
+  function buildCloneHeroQuaverData(parsed, difficultyKey, sourceName, replayPlayer) {
+    var notesRaw = parsed.difficulties[difficultyKey];
+    if (!notesRaw || !notesRaw.length) return null;
+
+    var tickToMs = makeTickToMs(parsed);
+
+    var hitObjects = [];
+    var maxEnd = 0;
+
+    for (var i = 0; i < notesRaw.length; i++) {
+      var n = notesRaw[i];
+      // Clone Hero lanes 0–4 map to 5K lanes 0–4.
+      if (n.lane < 0 || n.lane > 4) continue;
+
+      var startMs = Math.max(0, Math.round(tickToMs(n.tick)));
+      var endMs = n.sustain > 0 ? Math.max(0, Math.round(tickToMs(n.tick + n.sustain))) : 0;
+      if (endMs <= startMs) endMs = 0;
+
+      hitObjects.push({
+        Lane: n.lane,
+        StartTime: startMs,
+        EndTime: endMs,
+        HitSound: 0
+      });
+
+      if (startMs > maxEnd) maxEnd = startMs;
+      if (endMs > maxEnd) maxEnd = endMs;
+    }
+
+    // Consolidate strums / dedupe chords within 10ms so overlapping
+    // 5-lane strums don't produce flams.
+    var consolidated = consolidateChordNotes(
+      hitObjects.map(function (o) {
+        return {
+          lane: o.Lane,
+          start: o.StartTime,
+          end: o.EndTime > 0 ? o.EndTime : null,
+          sound: o.HitSound
+        };
+      }),
+      CH_CONSOLIDATE_MS
+    );
+
+    var finalObjects = consolidated.map(function (n) {
+      return {
+        Lane: n.lane,
+        StartTime: n.start,
+        EndTime: n.end === null ? 0 : n.end,
+        HitSound: n.sound || 0
+      };
+    });
+
+    var quaverData = {
+      Title: parsed.songInfo.Name || parsed.songInfo.SongName || sourceName || "Unknown",
+      Artist: parsed.songInfo.Artist || "Unknown Artist",
+      Creator: parsed.songInfo.Charter || parsed.songInfo.CharterName || "Unknown",
+      DifficultyName: difficultyKey.replace(/Single$/, ""),
+      KeyCount: CH_KEY_COUNT,
+      BPM: parsed.syncTrack[0].bpm,
+      TimingPoints: parsed.syncTrack.map(function (st) {
+        return {
+          StartTime: Math.max(0, Math.round(tickToMs(st.tick))),
+          BPM: st.bpm,
+          Signature: 4
+        };
+      }),
+      HitObjects: finalObjects,
+      Length: maxEnd,
+      SliderVelocities: [],
+      InitialScrollVelocity: 1,
+      Tags: "clone hero converted",
+      Source: ""
+    };
+
+    if (replayPlayer) {
+      quaverData.Tags = (quaverData.Tags + " player " + replayPlayer).trim();
+    }
+
+    return quaverData;
+  }
+
+  /* =========================================================
+     Quaver replay (.qr) parsing
+     ========================================================= */
+
+  function parseQuaverReplay(text) {
+    if (typeof jsyaml === "undefined") return null;
+
+    var data;
+    try {
+      data = jsyaml.load(text);
+    } catch (e) {
+      return null;
+    }
+    if (!data || typeof data !== "object") return null;
+
+    var playerName = String(data.ReplayPlayerName || "").trim();
+    if (!playerName) playerName = "Guest";
+
+    return {
+      playerName: playerName,
+      playerId: data.ReplayPlayerId,
+      accuracy: Number(data.ReplayAccuracy) || 0,
+      maxCombo: Number(data.ReplayMaxCombo) || 0,
+      grade: data.ReplayGrade,
+      timestamp: data.ReplayTimestamp,
+      mapId: data.ReplayMapId || null,
+      mapHash: data.ReplayMapHash || null,
+      inputs: Array.isArray(data.ReplayInputs) ? data.ReplayInputs : []
+    };
+  }
+
+  /* =========================================================
+     Quaver skin (.qs) handling
+     ========================================================= */
+
+  /**
+   * Tries to parse a .qs file. If it contains HitObjects, it's actually a
+   * map and is returned as Quaver data. Otherwise it's treated as a skin
+   * and we just keep the raw text.
+   */
+  function parseQsFile(text) {
+    if (typeof jsyaml === "undefined") return { type: "unknown" };
+
+    var data;
+    try {
+      data = jsyaml.load(text);
+    } catch (e) {
+      return { type: "unknown" };
+    }
+    if (!data || typeof data !== "object") return { type: "unknown" };
+
+    if (Array.isArray(data.HitObjects) && data.HitObjects.length > 0) {
+      return { type: "map", data: data };
+    }
+
+    return {
+      type: "skin",
+      name: data.Name || data.SkinName || "Unknown Skin",
+      author: data.Author || data.SkinAuthor || "",
+      raw: data
+    };
   }
 
   /* =========================================================
@@ -1354,8 +1668,6 @@
     });
   }
 
-  /* ---------- Encoders ---------- */
-
   function encodeWav(buf) {
     var numCh = buf.numberOfChannels;
     var sr = buf.sampleRate;
@@ -1469,7 +1781,6 @@
 
     push("osu file format v14", "");
 
-    /* ---- [General] ---- */
     var previewRaw = Number(d.PreviewTime);
     push("[General]");
     push("AudioFilename: " + audioFilename);
@@ -1484,7 +1795,6 @@
     push("WidescreenStoryboard: 0");
     push("");
 
-    /* ---- [Editor] ---- */
     push("[Editor]");
     push("DistanceSpacing: 1");
     push("BeatDivisor: 4");
@@ -1492,7 +1802,6 @@
     push("TimelineZoom: 1");
     push("");
 
-    /* ---- [Metadata] ---- */
     var title   = d.Title || "Untitled";
     var artist  = d.Artist || "Unknown Artist";
     var creator = d.Creator || "Unknown";
@@ -1510,6 +1819,9 @@
              speedTag + " " + fmtRate(rate) + "x " +
              (pitchShift ? "pitched" : "pitch preserved");
     }
+    if (map.meta.replayPlayerName) {
+      tags = (tags ? tags + " " : "") + "replay player " + map.meta.replayPlayerName;
+    }
 
     push("[Metadata]");
     push("Title:" + title);
@@ -1524,7 +1836,6 @@
     push("BeatmapSetID:-1");
     push("");
 
-    /* ---- [Difficulty] ---- */
     push("[Difficulty]");
     push("HPDrainRate:8");
     push("CircleSize:" + keys);
@@ -1534,7 +1845,6 @@
     push("SliderTickRate:1");
     push("");
 
-    /* ---- [Events] ---- */
     push("[Events]");
     push("//Background and Video events");
     if (bgFilename) push('0,0,"' + bgFilename.replace(/"/g, "") + '",0,0');
@@ -1546,7 +1856,6 @@
     push("//Storyboard Sound Samples");
     push("");
 
-    /* ---- [TimingPoints] ---- */
     push("[TimingPoints]");
 
     var timingLines = [];
@@ -1563,17 +1872,12 @@
       });
     }
 
-    // SV points — including negative (reverse) and extreme (teleport)
     var svs = map.svPoints || [];
     for (var j = 0; j < svs.length; j++) {
       var sv = svs[j];
       var svTime = sv.time / rate;
       var mult = sv.multiplier;
-
-      // osu!mania uses beatLength = -100 / multiplier.
-      // Negative multiplier -> positive beatLength -> reverse scroll.
       var svBeatLength = (mult === 0) ? 0 : (-100 / mult);
-
       timingLines.push({
         time: svTime,
         uninherited: 0,
@@ -1588,7 +1892,6 @@
     for (var k = 0; k < timingLines.length; k++) push(timingLines[k].line);
     push("");
 
-    /* ---- [HitObjects] ---- */
     push("[HitObjects]");
     for (var n = 0; n < notes.length; n++) {
       var note = notes[n];
@@ -1931,25 +2234,78 @@
   }
 
   /* =========================================================
-     Reading Quaver sources
+     Reading sources (Quaver + Clone Hero + Replays + Skins)
      ========================================================= */
 
-  function readQuaSources(files) {
-    var sources = [];
-    var packErrors = [];
+  function readAllSources(files) {
+    var quaSources = [];
+    var chSources = [];
+    var replaySources = [];
+    var skinSources = [];
+    var qsMapSources = [];
     var extracted = [];
+    var packErrors = [];
 
     var looseChain = Promise.resolve();
+
     for (var i = 0; i < files.length; i++) {
       (function (f) {
-        if (/\.qua$/i.test(f.name)) {
+        var ext = getExt(f.name);
+
+        if (ext === "qua") {
           looseChain = looseChain.then(function () {
             return f.text().then(function (text) {
-              sources.push({
+              quaSources.push({
                 name: f.name,
                 path: f.__relPath || f.webkitRelativePath || f.name,
                 text: text
               });
+            }, function (err) {
+              packErrors.push(f.name + ": " + (err && err.message ? err.message : err));
+            });
+          });
+        } else if (ext === "chart") {
+          looseChain = looseChain.then(function () {
+            return f.text().then(function (text) {
+              chSources.push({
+                name: f.name,
+                path: f.__relPath || f.webkitRelativePath || f.name,
+                text: text
+              });
+            }, function (err) {
+              packErrors.push(f.name + ": " + (err && err.message ? err.message : err));
+            });
+          });
+        } else if (ext === "qr") {
+          looseChain = looseChain.then(function () {
+            return f.text().then(function (text) {
+              replaySources.push({
+                name: f.name,
+                path: f.__relPath || f.webkitRelativePath || f.name,
+                text: text
+              });
+            }, function (err) {
+              packErrors.push(f.name + ": " + (err && err.message ? err.message : err));
+            });
+          });
+        } else if (ext === "qs") {
+          looseChain = looseChain.then(function () {
+            return f.text().then(function (text) {
+              var parsed = parseQsFile(text);
+              if (parsed.type === "map") {
+                qsMapSources.push({
+                  name: f.name,
+                  path: f.__relPath || f.webkitRelativePath || f.name,
+                  data: parsed.data
+                });
+              } else {
+                skinSources.push({
+                  name: f.name,
+                  path: f.__relPath || f.webkitRelativePath || f.name,
+                  text: text,
+                  parsed: parsed
+                });
+              }
             }, function (err) {
               packErrors.push(f.name + ": " + (err && err.message ? err.message : err));
             });
@@ -1960,10 +2316,10 @@
 
     var archiveChain = looseChain.then(function () {
       var chain = Promise.resolve();
+
       for (var j = 0; j < files.length; j++) {
         (function (pf) {
-          if (!/\.(qp|qzp|zip)$/i.test(pf.name)) return;
-
+          if (!isArchive(pf.name)) return;
           if (typeof JSZip === "undefined") {
             packErrors.push(pf.name + ": JSZip failed to load");
             return;
@@ -1972,28 +2328,95 @@
           chain = chain.then(function () {
             return JSZip.loadAsync(pf).then(function (zip) {
               var entryNames = Object.keys(zip.files);
+              var chartEntry = null;
               var innerChain = Promise.resolve();
+
+              // First find any chart files.
+              for (var k = 0; k < entryNames.length; k++) {
+                var e = zip.files[entryNames[k]];
+                if (e.dir) continue;
+                if (/\.chart$/i.test(e.name)) {
+                  chartEntry = e;
+                  break;
+                }
+              }
+
+              if (chartEntry) {
+                innerChain = innerChain.then(function () {
+                  return chartEntry.async("string").then(function (text) {
+                    chSources.push({
+                      name: pf.name,
+                      path: chartEntry.name,
+                      text: text,
+                      container: pf.name
+                    });
+                  }, function (err) {
+                    packErrors.push(pf.name + "/" + chartEntry.name + ": " +
+                                   (err && err.message ? err.message : err));
+                  });
+                });
+              }
+
               for (var k = 0; k < entryNames.length; k++) {
                 (function (name) {
                   var entry = zip.files[name];
                   if (entry.dir) return;
+                  if (entry === chartEntry) return;
 
                   if (/\.qua$/i.test(entry.name)) {
                     innerChain = innerChain.then(function () {
                       return entry.async("string").then(function (text) {
-                        sources.push({
+                        quaSources.push({
                           name: entry.name.split("/").pop(),
                           path: entry.name,
                           text: text
                         });
                       }, function (err) {
-                        packErrors.push(entry.name + ": " + (err && err.message ? err.message : err));
+                        packErrors.push(entry.name + ": " +
+                                       (err && err.message ? err.message : err));
+                      });
+                    });
+                  } else if (/\.qr$/i.test(entry.name)) {
+                    innerChain = innerChain.then(function () {
+                      return entry.async("string").then(function (text) {
+                        replaySources.push({
+                          name: entry.name.split("/").pop(),
+                          path: entry.name,
+                          text: text
+                        });
+                      }, function (err) {
+                        packErrors.push(entry.name + ": " +
+                                       (err && err.message ? err.message : err));
+                      });
+                    });
+                  } else if (/\.qs$/i.test(entry.name)) {
+                    innerChain = innerChain.then(function () {
+                      return entry.async("string").then(function (text) {
+                        var parsed = parseQsFile(text);
+                        if (parsed.type === "map") {
+                          qsMapSources.push({
+                            name: entry.name.split("/").pop(),
+                            path: entry.name,
+                            data: parsed.data
+                          });
+                        } else {
+                          skinSources.push({
+                            name: entry.name.split("/").pop(),
+                            path: entry.name,
+                            text: text,
+                            parsed: parsed
+                          });
+                        }
+                      }, function (err) {
+                        packErrors.push(entry.name + ": " +
+                                       (err && err.message ? err.message : err));
                       });
                     });
                   } else if (isAudio(entry.name) || isImage(entry.name)) {
                     innerChain = innerChain.then(function () {
                       return entry.async("blob").then(function (blob) {
-                        var file = new File([blob], entry.name.split("/").pop(), { type: blob.type });
+                        var file = new File([blob], entry.name.split("/").pop(),
+                                            { type: blob.type });
                         tagRelativePath(file, entry.name);
                         extracted.push(file);
                       }, function () {});
@@ -2001,6 +2424,7 @@
                   }
                 })(entryNames[k]);
               }
+
               return innerChain;
             }, function (err) {
               packErrors.push(pf.name + ": " + (err && err.message ? err.message : err));
@@ -2008,11 +2432,20 @@
           });
         })(files[j]);
       }
+
       return chain;
     });
 
     return archiveChain.then(function () {
-      return { sources: sources, errors: packErrors, extracted: extracted };
+      return {
+        qua: quaSources,
+        chart: chSources,
+        replays: replaySources,
+        skins: skinSources,
+        qsMaps: qsMapSources,
+        extracted: extracted,
+        errors: packErrors
+      };
     });
   }
 
@@ -2022,7 +2455,7 @@
 
     for (var i = 0; i < files.length; i++) {
       var f = files[i];
-      if (/\.(qua|qp|qzp|zip)$/i.test(f.name)) continue;
+      if (/\.(qua|qp|qzp|zip|qr|chart|sng|qs)$/i.test(f.name)) continue;
 
       var full = (f.__relPath || f.webkitRelativePath || f.name).toLowerCase();
       var base = f.name.toLowerCase();
@@ -2063,30 +2496,28 @@
      Building map records
      ========================================================= */
 
-  function parseQuaSource(source, sidecarIndex) {
-    if (typeof jsyaml === "undefined") {
-      throw new Error("js-yaml failed to load — check your internet connection.");
-    }
-
-    var data = jsyaml.load(source.text);
-    if (!data || typeof data !== "object") {
-      throw new Error("File does not look like a Quaver map (empty or invalid YAML).");
-    }
+  function buildMapRecord(data, sourceName, sourcePath, sidecarIndex, extras) {
+    extras = extras || {};
 
     var rawKeys = deriveKeyCount(data);
-    if (rawKeys <= 0) rawKeys = 4;
+    if (rawKeys <= 0) rawKeys = extras.defaultKeyCount || 4;
 
     if (rawKeys < MIN_KEYS) {
       throw new Error("Map uses " + rawKeys + " key — the minimum supported is 1K.");
     }
     if (rawKeys > MAX_KEYS) {
-      throw new Error("Map uses " + rawKeys + "K — only 1K–10K is supported. " +
-                      "(Quaver's " + rawKeys + "K mode is out of range.)");
+      throw new Error("Map uses " + rawKeys + "K — only 1K–10K is supported.");
     }
 
     var keyCount = clampKeys(rawKeys);
 
     var notes = extractNotes(data, keyCount);
+
+    // Consolidate chords (handles Clone Hero strums / duplicates within 10ms).
+    if (extras.consolidate !== false) {
+      notes = consolidateChordNotes(notes, CH_CONSOLIDATE_MS);
+    }
+
     var laneOffset = detectLaneOffset(notes, keyCount);
 
     var holdCount = 0;
@@ -2108,7 +2539,10 @@
     }
 
     var audioFile = findSidecar(sidecarIndex, data.AudioFile) || guessAudio(sidecarIndex);
-    var bgFile    = findSidecar(sidecarIndex, data.BackgroundFile) || guessBackground(sidecarIndex);
+    var bgFile = findSidecar(sidecarIndex, data.BackgroundFile) || guessBackground(sidecarIndex);
+
+    var replayPlayerName = extras.replayPlayerName || null;
+    var skinFiles = extras.skinFiles || [];
 
     var meta = {
       title: data.Title || "Untitled",
@@ -2133,16 +2567,14 @@
       hasAudio: !!audioFile,
       hasBg: !!bgFile,
       laneOffset: laneOffset,
-      initialScrollVelocity: isFinite(Number(data.InitialScrollVelocity))
-        ? Number(data.InitialScrollVelocity)
-        : 1,
-      bpmDoesNotAffectScrollVelocity: data.BPMDoesNotAffectScrollVelocity === true
+      replayPlayerName: replayPlayerName,
+      chartSourceType: extras.chartSourceType || null
     };
 
     return {
       id: "m" + (++uid),
-      fileName: source.name,
-      filePath: source.path,
+      fileName: sourceName,
+      filePath: sourcePath,
       data: data,
       meta: meta,
       notes: notes,
@@ -2152,6 +2584,7 @@
       bpmInfo: bpmInfo,
       audioFile: audioFile,
       bgFile: bgFile,
+      skinFiles: skinFiles,
       osuText: null,
       oszBlob: null,
       oszRate: null,
@@ -2161,14 +2594,56 @@
     };
   }
 
+  function parseQuaSource(source, sidecarIndex, extras) {
+    if (typeof jsyaml === "undefined") {
+      throw new Error("js-yaml failed to load — check your internet connection.");
+    }
+
+    var data = jsyaml.load(source.text);
+    if (!data || typeof data !== "object") {
+      throw new Error("File does not look like a Quaver map (empty or invalid YAML).");
+    }
+
+    return buildMapRecord(data, source.name, source.path, sidecarIndex, extras || {});
+  }
+
+  function buildCloneHeroMaps(chartSource, sidecarIndex, replayPlayerName, skinFiles) {
+    var parsed = parseChartText(chartSource.text);
+    var mapsOut = [];
+
+    var difficultyOrder = ["ExpertSingle", "HardSingle", "MediumSingle", "EasySingle"];
+    for (var i = 0; i < difficultyOrder.length; i++) {
+      var key = difficultyOrder[i];
+      if (!parsed.difficulties[key] || !parsed.difficulties[key].length) continue;
+
+      var qData = buildCloneHeroQuaverData(parsed, key, chartSource.name, replayPlayerName);
+      if (!qData) continue;
+
+      try {
+        var map = buildMapRecord(
+          qData,
+          chartSource.name,
+          chartSource.path + "#" + key,
+          sidecarIndex,
+          {
+            defaultKeyCount: CH_KEY_COUNT,
+            replayPlayerName: replayPlayerName,
+            skinFiles: skinFiles,
+            chartSourceType: "clonehero"
+          }
+        );
+        mapsOut.push(map);
+      } catch (err) {
+        // Skip difficulties that fail to convert.
+      }
+    }
+
+    return mapsOut;
+  }
+
   /* =========================================================
      Conversion + packaging
      ========================================================= */
-
-  function ensureOsuText(map) {
-    if (!map.osuText) map.osuText = buildOsuText(map);
-    return map.osuText;
-  }
 
   function buildOsz(map) {
     var rate = speedRate;
@@ -2195,6 +2670,16 @@
       zip.file(base + ".osu", map.osuText);
       if (audio) zip.file(audio.name, audio.blob);
       if (map.bgFile) zip.file(map.bgFile.name, map.bgFile);
+
+      // Bundle any Quaver skin files alongside the map (bundled as-is).
+      if (map.skinFiles && map.skinFiles.length) {
+        for (var i = 0; i < map.skinFiles.length; i++) {
+          var skin = map.skinFiles[i];
+          try {
+            zip.file("skin_" + skin.name, skin.text);
+          } catch (e) {}
+        }
+      }
 
       return zip.generateAsync({
         type: "blob",
@@ -2269,25 +2754,15 @@
 
     if (m.svCount > 0) {
       chips.push('<span class="chip">' + m.svCount + " SV</span>");
-      if (m.svHasReverse) {
-        chips.push('<span class="chip sv-reverse">↺ reverse</span>');
-      }
-      if (m.svHasTeleport) {
-        chips.push('<span class="chip sv-teleport">⚡ teleport</span>');
-      }
-      if (m.svHasFreeze) {
-        chips.push('<span class="chip">❄ freeze</span>');
-      }
+      if (m.svHasReverse) chips.push('<span class="chip sv-reverse">↺ reverse</span>');
+      if (m.svHasTeleport) chips.push('<span class="chip sv-teleport">⚡ teleport</span>');
+      if (m.svHasFreeze) chips.push('<span class="chip">❄ freeze</span>');
     }
 
     chips.push('<span class="chip">' + formatLength(shownLength) + "</span>");
 
-    if (kps.avg > 0) {
-      chips.push('<span class="chip kps">' + fmtKpsAvg(kps.avg) + " avg KPS</span>");
-    }
-    if (kps.peak > 0) {
-      chips.push('<span class="chip kps-peak">' + kps.peak + " peak KPS</span>");
-    }
+    if (kps.avg > 0) chips.push('<span class="chip kps">' + fmtKpsAvg(kps.avg) + " avg KPS</span>");
+    if (kps.peak > 0) chips.push('<span class="chip kps-peak">' + kps.peak + " peak KPS</span>");
 
     if (m.laneOffset > 0) {
       chips.push('<span class="chip fix">↔ 1-indexed lanes → shifted</span>');
@@ -2300,6 +2775,10 @@
     chips.push(m.hasBg
       ? '<span class="chip has">▣ ' + esc(map.bgFile.name) + "</span>"
       : '<span class="chip miss">no bg found</span>');
+
+    if (m.replayPlayerName) {
+      chips.push('<span class="chip player">👤 ' + esc(m.replayPlayerName) + "</span>");
+    }
 
     var byline = "charted by " + esc(m.creator);
     if (m.source) byline += " · from " + esc(m.source);
@@ -2420,7 +2899,7 @@
   }
 
   /* =========================================================
-     Ingest queue — prevents concurrent upload races
+     Ingest queue
      ========================================================= */
 
   var ingestQueue = [];
@@ -2461,29 +2940,63 @@
 
     setStatus("Reading " + files.length + " file" + (files.length === 1 ? "" : "s") + "…");
 
-    return readQuaSources(files).then(function (result) {
+    return readAllSources(files).then(function (result) {
       var allSidecars = files.concat(result.extracted || []);
       var sidecarIndex = buildSidecarIndex(allSidecars);
 
-      if (!result.sources.length) {
-        setStatus(
-          "No Quaver maps found. Drop .qua files, a .qp pack, or a folder containing them." +
-          (result.errors.length ? " (" + result.errors.join("; ") + ")" : ""),
-          "err"
-        );
-        return;
+      // Parse replay files first so we can associate player names.
+      var replays = [];
+      for (var i = 0; i < result.replays.length; i++) {
+        var replay = parseQuaverReplay(result.replays[i].text);
+        if (replay) {
+          replay.sourceName = result.replays[i].name;
+          replays.push(replay);
+        }
+      }
+
+      function replayForMap(mapData) {
+        if (!replays.length) return null;
+
+        // Prefer exact MapId match.
+        if (mapData && mapData.MapId) {
+          for (var r = 0; r < replays.length; r++) {
+            if (replays[r].mapId && replays[r].mapId === mapData.MapId) {
+              return replays[r].playerName;
+            }
+          }
+        }
+
+        // Fall back to the first replay.
+        return replays[0].playerName;
       }
 
       var added = 0;
       var failed = [];
-      var autoDetected = 0;
       var rejected = [];
+      var autoDetected = 0;
       var svGimmick = 0;
+      var cloneHeroCount = 0;
 
-      for (var i = 0; i < result.sources.length; i++) {
-        var src = result.sources[i];
+      var skinFilesForMaps = result.skins.map(function (s) {
+        return { name: s.name, text: s.text };
+      });
+
+      // 1. Quaver .qua sources
+      for (var i = 0; i < result.qua.length; i++) {
+        var src = result.qua[i];
         try {
-          var map = parseQuaSource(src, sidecarIndex);
+          var parsedForReplay = null;
+          try {
+            parsedForReplay = jsyaml.load(src.text);
+          } catch (e) {}
+
+          var playerName = replayForMap(parsedForReplay);
+
+          var map = parseQuaSource(src, sidecarIndex, {
+            replayPlayerName: playerName,
+            skinFiles: skinFilesForMaps
+          });
+
           if (map.meta.noteCount === 0) {
             failed.push(src.name + ": no hit objects");
             continue;
@@ -2497,9 +3010,7 @@
           if (dup) continue;
 
           if (map.meta.bpmSource === "notes") autoDetected++;
-          if (map.meta.svHasReverse || map.meta.svHasTeleport || map.meta.svHasFreeze) {
-            svGimmick++;
-          }
+          if (map.meta.svHasReverse || map.meta.svHasTeleport || map.meta.svHasFreeze) svGimmick++;
           maps.push(map);
           added++;
         } catch (err) {
@@ -2512,16 +3023,79 @@
         }
       }
 
+      // 2. Clone Hero .chart / .sng sources
+      for (var i = 0; i < result.chart.length; i++) {
+        var chartSrc = result.chart[i];
+        try {
+          var playerName = replays.length ? replays[0].playerName : null;
+          var chMaps = buildCloneHeroMaps(chartSrc, sidecarIndex, playerName, skinFilesForMaps);
+          if (!chMaps.length) {
+            failed.push(chartSrc.name + ": no convertible difficulties");
+            continue;
+          }
+          for (var k = 0; k < chMaps.length; k++) {
+            var cm = chMaps[k];
+            var dup2 = maps.some(function (m) {
+              return m.filePath === cm.filePath &&
+                     m.meta.difficultyName === cm.meta.difficultyName &&
+                     m.meta.keyCount === cm.meta.keyCount;
+            });
+            if (dup2) continue;
+            maps.push(cm);
+            added++;
+            cloneHeroCount++;
+          }
+        } catch (err) {
+          failed.push(chartSrc.name + ": " +
+                      (err && err.message ? err.message : String(err)));
+        }
+      }
+
+      // 3. Quaver .qs that actually contain map data
+      for (var i = 0; i < result.qsMaps.length; i++) {
+        var qsSrc = result.qsMaps[i];
+        try {
+          var playerName = replayForMap(qsSrc.data);
+          var qMap = buildMapRecord(
+            qsSrc.data,
+            qsSrc.name,
+            qsSrc.path,
+            sidecarIndex,
+            { replayPlayerName: playerName, skinFiles: skinFilesForMaps }
+          );
+          if (qMap.meta.noteCount === 0) {
+            failed.push(qsSrc.name + ": no hit objects");
+            continue;
+          }
+          var dup3 = maps.some(function (m) {
+            return m.filePath === qMap.filePath &&
+                   m.meta.difficultyName === qMap.meta.difficultyName &&
+                   m.meta.keyCount === qMap.meta.keyCount;
+          });
+          if (dup3) continue;
+          if (qMap.meta.bpmSource === "notes") autoDetected++;
+          if (qMap.meta.svHasReverse || qMap.meta.svHasTeleport || qMap.meta.svHasFreeze) svGimmick++;
+          maps.push(qMap);
+          added++;
+        } catch (err) {
+          failed.push(qsSrc.name + ": " +
+                      (err && err.message ? err.message : String(err)));
+        }
+      }
+
       render();
 
       var statusMsg = "Loaded " + added + " map" + (added === 1 ? "" : "s") + ".";
       if (autoDetected > 0) {
         statusMsg += " " + autoDetected + " BPM value" + (autoDetected === 1 ? " was" : "s were") +
-                     " auto-detected from note spacing.";
+                     " auto-detected.";
       }
       if (svGimmick > 0) {
         statusMsg += " " + svGimmick + " map" + (svGimmick === 1 ? "" : "s") +
-                     " contain SV gimmicks (reverse/teleport/freeze).";
+                     " contain SV gimmicks.";
+      }
+      if (replays.length > 0 && added > 0) {
+        statusMsg += " Player data attached: " + replays[0].playerName + ".";
       }
       if (rejected.length) statusMsg += " Rejected (out of 1K–10K range): " + rejected.join("; ");
       if (result.errors.length) statusMsg += " Pack errors: " + result.errors.join("; ");
@@ -2708,7 +3282,7 @@
     }
 
     if (action === "download-osu") {
-      ensureOsuText(map);
+      if (!map.osuText) map.osuText = buildOsuText(map);
       downloadBlob(new Blob([map.osuText], { type: "text/plain;charset=utf-8" }), osuFilename(map));
       return;
     }
